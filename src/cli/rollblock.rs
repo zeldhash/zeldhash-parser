@@ -10,6 +10,16 @@ use serde::Deserialize;
 
 use super::parse_duration;
 
+pub const DEFAULT_ROLLBLOCK_REMOTE_USER: &str = "mhin";
+pub const DEFAULT_ROLLBLOCK_REMOTE_PASSWORD: &str = "mhin";
+pub const DEFAULT_ROLLBLOCK_REMOTE_PORT: u16 = 9443;
+pub const HELP_ROLLBLOCK_REMOTE_USER: &str =
+    "Optional. Basic auth username for the embedded rollblock server. [default: mhin]";
+pub const HELP_ROLLBLOCK_REMOTE_PASSWORD: &str = "Optional. Basic auth password for the embedded \
+                                                 rollblock server. [default: mhin]";
+pub const HELP_ROLLBLOCK_REMOTE_PORT: &str =
+    "Optional. TCP port for the embedded rollblock server. [default: 9443]";
+
 macro_rules! define_usize_default_with_help {
     ($value_ident:ident, $help_ident:ident, $value:literal, $help_prefix:literal, $help_suffix:literal) => {
         pub const $value_ident: usize = $value;
@@ -114,16 +124,11 @@ define_async_defaults!(
     }
 );
 
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
 pub enum RollblockMode {
     New,
+    #[default]
     Existing,
-}
-
-impl Default for RollblockMode {
-    fn default() -> Self {
-        Self::Existing
-    }
 }
 
 #[derive(ValueEnum, Clone, Debug, Deserialize)]
@@ -142,6 +147,37 @@ pub enum RollblockDurabilityKind {
 #[command(next_help_heading = "Rollblock parameters")]
 #[serde(default)]
 pub struct RollblockOptions {
+    #[arg(
+        long = "rollblock_user",
+        alias = "rollblock-user",
+        env = "ROLLBLOCK_USER",
+        global = true,
+        value_name = "USER",
+        help = HELP_ROLLBLOCK_REMOTE_USER
+    )]
+    pub user: Option<String>,
+
+    #[arg(
+        long = "rollblock_password",
+        alias = "rollblock-password",
+        env = "ROLLBLOCK_PASSWORD",
+        global = true,
+        value_name = "PASSWORD",
+        hide_env_values = true,
+        help = HELP_ROLLBLOCK_REMOTE_PASSWORD
+    )]
+    pub password: Option<String>,
+
+    #[arg(
+        long = "rollblock_port",
+        alias = "rollblock-port",
+        env = "ROLLBLOCK_PORT",
+        global = true,
+        value_name = "PORT",
+        help = HELP_ROLLBLOCK_REMOTE_PORT
+    )]
+    pub port: Option<u16>,
+
     #[arg(
         long = "rollblock_shards_count",
         alias = "rollblock-shards-count",

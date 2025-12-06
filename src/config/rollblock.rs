@@ -1,7 +1,6 @@
 use std::path::Path;
 
 use anyhow::{anyhow, Context, Result};
-use rand::{distr::Alphanumeric, Rng};
 use rollblock::{
     orchestrator::DurabilityMode, MhinStoreBlockFacade, RemoteServerSettings, StoreConfig,
 };
@@ -10,13 +9,12 @@ use crate::cli::{
     RollblockDurabilityKind, RollblockMode, RollblockOptions,
     DEFAULT_ROLLBLOCK_ASYNC_MAX_PENDING_BLOCKS, DEFAULT_ROLLBLOCK_ASYNC_RELAXED_SYNC_EVERY,
     DEFAULT_ROLLBLOCK_COMPRESS_JOURNAL, DEFAULT_ROLLBLOCK_INITIAL_CAPACITY,
-    DEFAULT_ROLLBLOCK_SHARDS_COUNT, DEFAULT_ROLLBLOCK_SYNCHRONOUS_RELAXED_SYNC_EVERY,
-    DEFAULT_ROLLBLOCK_THREAD_COUNT,
+    DEFAULT_ROLLBLOCK_REMOTE_PASSWORD, DEFAULT_ROLLBLOCK_REMOTE_PORT,
+    DEFAULT_ROLLBLOCK_REMOTE_USER, DEFAULT_ROLLBLOCK_SHARDS_COUNT,
+    DEFAULT_ROLLBLOCK_SYNCHRONOUS_RELAXED_SYNC_EVERY, DEFAULT_ROLLBLOCK_THREAD_COUNT,
 };
 
 use super::overlay::Overlay;
-const EMBEDDED_REMOTE_USERNAME: &str = "proto";
-const EMBEDDED_REMOTE_PASSWORD_LEN: usize = 32;
 
 #[derive(Debug, Clone)]
 pub struct RollblockSettings {
@@ -134,10 +132,18 @@ impl RollblockOptions {
             }
         };
 
-        let remote_username = EMBEDDED_REMOTE_USERNAME.to_string();
-        let remote_password = generate_remote_password();
-        let remote_settings =
+        let remote_username = self
+            .user
+            .unwrap_or_else(|| DEFAULT_ROLLBLOCK_REMOTE_USER.to_string());
+        let remote_password = self
+            .password
+            .unwrap_or_else(|| DEFAULT_ROLLBLOCK_REMOTE_PASSWORD.to_string());
+        let remote_port = self.port.unwrap_or(DEFAULT_ROLLBLOCK_REMOTE_PORT);
+
+        let mut remote_settings =
             RemoteServerSettings::default().with_basic_auth(remote_username, remote_password);
+        remote_settings.bind_address.set_port(remote_port);
+
         config = config.with_remote_server(remote_settings);
         config = config
             .enable_remote_server()
@@ -182,6 +188,9 @@ impl RollblockSettings {
 impl Overlay for RollblockOptions {
     fn overlay(self, overrides: Self) -> Self {
         Self {
+            user: overrides.user.or(self.user),
+            password: overrides.password.or(self.password),
+            port: overrides.port.or(self.port),
             shards_count: overrides.shards_count.or(self.shards_count),
             initial_capacity: overrides.initial_capacity.or(self.initial_capacity),
             thread_count: overrides.thread_count.or(self.thread_count),
@@ -216,14 +225,6 @@ impl Overlay for RollblockOptions {
     }
 }
 
-fn generate_remote_password() -> String {
-    let mut rng = rand::rng();
-    (0..EMBEDDED_REMOTE_PASSWORD_LEN)
-        .map(|_| rng.sample(Alphanumeric))
-        .map(char::from)
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -249,12 +250,18 @@ mod tests {
             thread_count: Some(2),
             compress_journal: Some(false),
             async_max_pending_blocks: Some(10),
+            user: Some("base-user".to_string()),
+            password: Some("base-pass".to_string()),
+            port: Some(DEFAULT_ROLLBLOCK_REMOTE_PORT),
             ..Default::default()
         };
         let overrides = RollblockOptions {
             thread_count: Some(8),
             compress_journal: None,
             async_max_pending_blocks: Some(20),
+            user: None,
+            password: None,
+            port: None,
             ..Default::default()
         };
 
@@ -267,17 +274,50 @@ mod tests {
             "should retain base when override missing"
         );
         assert_eq!(merged.async_max_pending_blocks, Some(20));
+        assert_eq!(merged.user.as_deref(), Some("base-user"));
+        assert_eq!(merged.password.as_deref(), Some("base-pass"));
+        assert_eq!(merged.port, Some(DEFAULT_ROLLBLOCK_REMOTE_PORT));
     }
 
     #[test]
-    fn generate_remote_password_matches_policy() {
-        let password = generate_remote_password();
+    fn build_new_store_applies_remote_defaults() {
+        let temp = tempdir().expect("tempdir should be created");
+        let settings = RollblockOptions::default()
+            .build(temp.path())
+            .expect("rollblock settings build");
 
-        assert_eq!(password.len(), EMBEDDED_REMOTE_PASSWORD_LEN);
-        assert!(
-            password.chars().all(|c| c.is_ascii_alphanumeric()),
-            "password should remain alphanumeric for basic auth"
-        );
+        let remote = settings
+            .store_config
+            .remote_server
+            .as_ref()
+            .expect("remote server should be configured");
+
+        assert_eq!(remote.auth.username, DEFAULT_ROLLBLOCK_REMOTE_USER);
+        assert_eq!(remote.auth.password, DEFAULT_ROLLBLOCK_REMOTE_PASSWORD);
+        assert_eq!(remote.bind_address.port(), DEFAULT_ROLLBLOCK_REMOTE_PORT);
+    }
+
+    #[test]
+    fn build_overrides_remote_settings_from_options() {
+        let temp = tempdir().expect("tempdir should be created");
+        let options = RollblockOptions {
+            user: Some("alice".to_string()),
+            password: Some("wonderland".to_string()),
+            port: Some(9555),
+            ..Default::default()
+        };
+        let settings = options
+            .build(temp.path())
+            .expect("rollblock settings build");
+        let remote = settings
+            .store_config
+            .remote_server
+            .as_ref()
+            .expect("remote server should be configured");
+
+        assert_eq!(remote.auth.username, "alice");
+        assert_eq!(remote.auth.password, "wonderland");
+        assert_eq!(remote.bind_address.port(), 9555);
     }
 
     #[test]
@@ -312,6 +352,12 @@ mod tests {
         assert!(matches!(settings.mode, RollblockMode::New));
         // Just verify it built successfully with a new store
         assert!(settings.store_config.enable_server);
+        let remote = settings
+            .store_config
+            .remote_server
+            .as_ref()
+            .expect("remote server should be configured");
+        assert_eq!(remote.bind_address.port(), DEFAULT_ROLLBLOCK_REMOTE_PORT);
     }
 
     #[test]
@@ -482,6 +528,9 @@ mod tests {
             async_max_pending_blocks: Some(100),
             async_relaxed_sync_every: Some(10),
             synchronous_relaxed_sync_every: Some(5),
+            user: Some("base-user".to_string()),
+            password: Some("base-pass".to_string()),
+            port: Some(DEFAULT_ROLLBLOCK_REMOTE_PORT),
         };
 
         let overrides = RollblockOptions {
@@ -511,5 +560,8 @@ mod tests {
         assert_eq!(merged.async_max_pending_blocks, Some(100));
         assert_eq!(merged.async_relaxed_sync_every, Some(10));
         assert_eq!(merged.synchronous_relaxed_sync_every, Some(5));
+        assert_eq!(merged.user.as_deref(), Some("base-user"));
+        assert_eq!(merged.password.as_deref(), Some("base-pass"));
+        assert_eq!(merged.port, Some(DEFAULT_ROLLBLOCK_REMOTE_PORT));
     }
 }

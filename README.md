@@ -70,10 +70,15 @@ thread_count = 8
 max_batch_size_mb = 256
 
 [rollblock]
+user = "mhin"       # change this in production
+password = "mhin"   # change this in production
+port = 9443         # default port
 shards_count = 16
 thread_count = 4
 initial_capacity = 100_000_000
 ```
+
+The embedded rollblock server binds to `127.0.0.1` with basic authentication. By default it uses the `mhin`/`mhin` credentials on port `9443`; change these via `--rollblock_user`, `--rollblock_password`, and `--rollblock_port`. The parser emits a startup warning when the defaults are still in use.
 
 ## Architecture
 
@@ -118,7 +123,7 @@ Options:
 
 - Rust 2021 edition
 - Bitcoin Core node with RPC enabled
-- ~100GB+ disk space for mainnet UTXO set
+- ~50GB+ disk space for mainnet UTXO set
 
 ## Data Storage
 
@@ -179,7 +184,7 @@ use xxhash_rust::xxh64::xxh64;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Connect to rollblock server
-    let auth = BasicAuthConfig::new("user", "password");
+    let auth = BasicAuthConfig::new("your_user", "your_password");
     let config = ClientConfig::without_tls(auth);
     let mut client = RemoteStoreClient::connect("127.0.0.1:9443", config)?;
 

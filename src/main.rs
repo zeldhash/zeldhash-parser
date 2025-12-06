@@ -54,7 +54,10 @@ use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::filter::Directive;
 use tracing_subscriber::EnvFilter;
 
-use crate::cli::{Cli, Command as LifecycleCommand};
+use crate::cli::{
+    Cli, Command as LifecycleCommand, DEFAULT_ROLLBLOCK_REMOTE_PASSWORD,
+    DEFAULT_ROLLBLOCK_REMOTE_USER,
+};
 use crate::config::{load_runtime_paths, AppConfig, RuntimePaths};
 use crate::parser::MhinParser;
 use crate::progress::ProgressReporter;
@@ -161,6 +164,8 @@ fn announce_configuration(app_config: &AppConfig, interactive: bool) {
     let stats_db = app_config.data_dir.join(DB_FILE_NAME);
     emit(format!("Stats db: {}", stats_db.display()));
     emit(String::new());
+
+    warn_on_default_rollblock_credentials(app_config, interactive);
 }
 
 fn utxo_endpoint(app_config: &AppConfig) -> String {
@@ -180,12 +185,37 @@ fn utxo_endpoint(app_config: &AppConfig) -> String {
                 "http"
             };
             format!(
-                "{scheme}://{}:{}@{}",
-                settings.auth.username, settings.auth.password, settings.bind_address
+                "{scheme}://{}@{}",
+                settings.auth.username, settings.bind_address
             )
         }
         None => "embedded rollblock server settings unavailable".to_string(),
     }
+}
+
+fn warn_on_default_rollblock_credentials(app_config: &AppConfig, interactive: bool) {
+    let store_config = &app_config.rollblock.store_config;
+    if !store_config.enable_server || !is_default_rollblock_credentials(store_config) {
+        return;
+    }
+
+    let message = "rollblock credentials are still set to defaults; override with --rollblock_user/--rollblock_password for security.";
+    if interactive {
+        eprintln!("Warning: {message}");
+    } else {
+        tracing::warn!("{message}");
+    }
+}
+
+fn is_default_rollblock_credentials(store_config: &rollblock::StoreConfig) -> bool {
+    store_config
+        .remote_server
+        .as_ref()
+        .map(|remote| {
+            remote.auth.username == DEFAULT_ROLLBLOCK_REMOTE_USER
+                && remote.auth.password == DEFAULT_ROLLBLOCK_REMOTE_PASSWORD
+        })
+        .unwrap_or(false)
 }
 
 fn determine_launch(cli: &Cli) -> LaunchMode {
@@ -527,7 +557,7 @@ mod tests {
         let app_config = build_app_config(temp.path(), store_config);
         let endpoint = utxo_endpoint(&app_config);
 
-        assert_eq!(endpoint, "http://user:pass@127.0.0.1:9000");
+        assert_eq!(endpoint, "http://user@127.0.0.1:9000");
     }
 
     #[test]
@@ -704,7 +734,38 @@ mod tests {
         let app_config = build_app_config(temp.path(), store_config);
         let endpoint = utxo_endpoint(&app_config);
 
-        assert_eq!(endpoint, "https://user:pass@127.0.0.1:9000");
+        assert_eq!(endpoint, "https://user@127.0.0.1:9000");
+    }
+
+    #[test]
+    fn detects_default_rollblock_credentials() {
+        let temp = TempDir::new().expect("temp dir");
+        let mut store_config = StoreConfig::existing(temp.path());
+        let mut remote = RemoteServerSettings::default().with_basic_auth(
+            DEFAULT_ROLLBLOCK_REMOTE_USER,
+            DEFAULT_ROLLBLOCK_REMOTE_PASSWORD,
+        );
+        remote.bind_address = "127.0.0.1:9000"
+            .parse::<SocketAddr>()
+            .expect("parse socket address");
+        store_config.enable_server = true;
+        store_config.remote_server = Some(remote);
+
+        assert!(is_default_rollblock_credentials(&store_config));
+    }
+
+    #[test]
+    fn detects_custom_rollblock_credentials() {
+        let temp = TempDir::new().expect("temp dir");
+        let mut store_config = StoreConfig::existing(temp.path());
+        let mut remote = RemoteServerSettings::default().with_basic_auth("user", "custom");
+        remote.bind_address = "127.0.0.1:9000"
+            .parse::<SocketAddr>()
+            .expect("parse socket address");
+        store_config.enable_server = true;
+        store_config.remote_server = Some(remote);
+
+        assert!(!is_default_rollblock_credentials(&store_config));
     }
 
     #[test]
