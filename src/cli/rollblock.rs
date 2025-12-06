@@ -1,6 +1,11 @@
+//! Rollblock CLI options for UTXO store configuration.
+//!
+//! Provides command-line arguments for configuring the rollblock UTXO store,
+//! including sharding, durability modes, and journal settings.
+
 use std::time::Duration;
 
-use clap::{Args, ValueEnum, builder::BoolishValueParser};
+use clap::{builder::BoolishValueParser, Args, ValueEnum};
 use serde::Deserialize;
 
 use super::parse_duration;

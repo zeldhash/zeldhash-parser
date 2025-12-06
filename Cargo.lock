@@ -1571,9 +1571,9 @@ dependencies = [
 
 [[package]]
 name = "protoblock"
-version = "0.1.5"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3d500ae2568d89b711f1048bef78382b9911da1af40a66673c9d6a503f4b482"
+checksum = "fa73ea2d6f83c5f32b4c87d0b84e5aa8a5ac52692f44cfc85aca67eb1bf9cc73"
 dependencies = [
  "anyhow",
  "base64 0.21.7",

@@ -1,3 +1,8 @@
+//! Protoblock CLI options for block fetching configuration.
+//!
+//! Provides command-line arguments for configuring the protoblock block fetcher,
+//! including RPC connection settings, threading, and batching parameters.
+
 use std::time::Duration;
 
 use clap::Args;

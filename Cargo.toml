@@ -1,7 +1,14 @@
 [package]
 name = "mhinparser"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT OR Apache-2.0"
+description = "High-performance Bitcoin blockchain parser implementing the My Hash Is Nice protocol"
+readme = "README.md"
+repository = "https://github.com/ouziel-slama/mhinparser"
+keywords = ["bitcoin", "blockchain", "parser", "mhin"]
+categories = ["cryptography::cryptocurrencies"]
 
 [dependencies]
 anyhow = "1.0.94"
@@ -11,7 +18,7 @@ directories = "5.0.1"
 humantime = "2.1.0"
 humantime-serde = "1.1.1"
 libc = "0.2.169"
-protoblock = "0.1.5"
+protoblock = "0.1.6"
 rollblock = "0.3.2"
 mhinprotocol = "0.2.3"
 serde = { version = "1.0.214", features = ["derive"] }

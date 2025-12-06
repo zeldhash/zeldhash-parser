@@ -1,3 +1,8 @@
+//! Command-line interface definitions and argument parsing.
+//!
+//! This module provides the CLI structure for mhinparser using [`clap`],
+//! including options for protoblock and rollblock configuration.
+
 mod args;
 mod duration;
 mod protoblock;
@@ -6,13 +11,14 @@ mod rollblock;
 pub use args::{Cli, Command, MhinNetworkArg};
 pub use duration::parse_duration;
 pub use protoblock::{
-    DEFAULT_PROTOBLOCK_MAX_BATCH_SIZE_MB, DEFAULT_PROTOBLOCK_REORG_WINDOW_SIZE,
+    ProtoblockOptions, DEFAULT_PROTOBLOCK_MAX_BATCH_SIZE_MB, DEFAULT_PROTOBLOCK_REORG_WINDOW_SIZE,
     DEFAULT_PROTOBLOCK_RPC_PASSWORD, DEFAULT_PROTOBLOCK_RPC_URL, DEFAULT_PROTOBLOCK_RPC_USER,
-    DEFAULT_PROTOBLOCK_THREAD_COUNT, ProtoblockOptions,
+    DEFAULT_PROTOBLOCK_THREAD_COUNT,
 };
 pub use rollblock::{
+    RollblockDurabilityKind, RollblockMode, RollblockOptions,
     DEFAULT_ROLLBLOCK_ASYNC_MAX_PENDING_BLOCKS, DEFAULT_ROLLBLOCK_ASYNC_RELAXED_SYNC_EVERY,
     DEFAULT_ROLLBLOCK_COMPRESS_JOURNAL, DEFAULT_ROLLBLOCK_INITIAL_CAPACITY,
     DEFAULT_ROLLBLOCK_SHARDS_COUNT, DEFAULT_ROLLBLOCK_SYNCHRONOUS_RELAXED_SYNC_EVERY,
-    DEFAULT_ROLLBLOCK_THREAD_COUNT, RollblockDurabilityKind, RollblockMode, RollblockOptions,
+    DEFAULT_ROLLBLOCK_THREAD_COUNT,
 };

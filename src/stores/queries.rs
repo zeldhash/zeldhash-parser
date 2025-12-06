@@ -1,6 +1,11 @@
-use anyhow::{Context, Result};
-use rusqlite::{OptionalExtension, Transaction, params};
+//! SQL query helpers for the SQLite stats database.
+//!
+//! Provides low-level database operations for reward and statistics tables.
 
+use anyhow::{Context, Result};
+use rusqlite::{params, OptionalExtension, Transaction};
+
+/// Creates the `rewards` table if it does not exist.
 pub fn create_rewards_table(tx: &Transaction<'_>) -> Result<()> {
     tx.execute(
         r#"
@@ -19,6 +24,7 @@ pub fn create_rewards_table(tx: &Transaction<'_>) -> Result<()> {
     Ok(())
 }
 
+/// Creates the `stats` table if it does not exist.
 pub fn create_stats_table(tx: &Transaction<'_>) -> Result<()> {
     tx.execute(
         r#"
@@ -34,6 +40,7 @@ pub fn create_stats_table(tx: &Transaction<'_>) -> Result<()> {
     Ok(())
 }
 
+/// Creates an index on `rewards(block_index)` for efficient rollback queries.
 pub fn create_rewards_block_index_index(tx: &Transaction<'_>) -> Result<()> {
     tx.execute(
         "CREATE INDEX IF NOT EXISTS rewards_block_index_idx ON rewards(block_index)",
@@ -43,6 +50,7 @@ pub fn create_rewards_block_index_index(tx: &Transaction<'_>) -> Result<()> {
     Ok(())
 }
 
+/// Deletes all reward rows with `block_index > threshold`.
 pub fn delete_rewards_after_block(tx: &Transaction<'_>, block_index: i64) -> Result<()> {
     tx.execute(
         "DELETE FROM rewards WHERE block_index > ?1",
@@ -52,6 +60,7 @@ pub fn delete_rewards_after_block(tx: &Transaction<'_>, block_index: i64) -> Res
     Ok(())
 }
 
+/// Deletes all stats rows with `block_index > threshold`.
 pub fn delete_stats_after_block(tx: &Transaction<'_>, block_index: i64) -> Result<()> {
     tx.execute(
         "DELETE FROM stats WHERE block_index > ?1",
@@ -61,6 +70,7 @@ pub fn delete_stats_after_block(tx: &Transaction<'_>, block_index: i64) -> Resul
     Ok(())
 }
 
+/// Inserts a single reward row into the `rewards` table.
 pub fn insert_reward(
     tx: &Transaction<'_>,
     block_index: i64,
@@ -81,6 +91,7 @@ pub fn insert_reward(
     Ok(())
 }
 
+/// Inserts block-level and cumulative statistics as JSON strings.
 pub fn insert_stats(
     tx: &Transaction<'_>,
     block_index: i64,
@@ -95,6 +106,7 @@ pub fn insert_stats(
     Ok(())
 }
 
+/// Returns the most recent cumulative stats JSON for blocks before `block_index`.
 pub fn select_latest_cumul_stats(tx: &Transaction<'_>, block_index: i64) -> Result<Option<String>> {
     tx.query_row(
         "SELECT cumul_stats FROM stats WHERE block_index < ?1 ORDER BY block_index DESC LIMIT 1",
@@ -103,4 +115,182 @@ pub fn select_latest_cumul_stats(tx: &Transaction<'_>, block_index: i64) -> Resu
     )
     .optional()
     .context("failed to fetch cumulative stats")
+}
+
+#[cfg(test)]
+mod tests {
+    use rusqlite::{params, Connection};
+
+    use super::*;
+
+    #[test]
+    fn create_tables_and_index() {
+        let mut conn = Connection::open_in_memory().expect("in-memory db");
+        let tx = conn
+            .transaction()
+            .expect("transaction creation should succeed");
+
+        create_rewards_table(&tx).expect("create rewards");
+        create_stats_table(&tx).expect("create stats");
+        create_rewards_block_index_index(&tx).expect("create index");
+
+        let rewards_exists: i64 = tx
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='rewards'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("rewards table query");
+        let stats_exists: i64 = tx
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='stats'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("stats table query");
+        let index_exists: i64 = tx
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='index' AND name='rewards_block_index_idx'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("index query");
+
+        assert_eq!(rewards_exists, 1);
+        assert_eq!(stats_exists, 1);
+        assert_eq!(index_exists, 1);
+    }
+
+    #[test]
+    fn select_latest_cumul_stats_returns_latest_before_block() {
+        let mut conn = Connection::open_in_memory().expect("in-memory db");
+        let tx = conn
+            .transaction()
+            .expect("transaction creation should succeed");
+        create_stats_table(&tx).expect("create stats");
+
+        tx.execute(
+            "INSERT INTO stats (block_index, block_stats, cumul_stats) VALUES (?1, 'b1', 'c1')",
+            params![1],
+        )
+        .expect("insert block 1");
+        tx.execute(
+            "INSERT INTO stats (block_index, block_stats, cumul_stats) VALUES (?1, 'b2', 'c2')",
+            params![2],
+        )
+        .expect("insert block 2");
+
+        let latest = select_latest_cumul_stats(&tx, 3).expect("select latest");
+        assert_eq!(latest.as_deref(), Some("c2"));
+
+        let latest_before_two = select_latest_cumul_stats(&tx, 2).expect("select before 2");
+        assert_eq!(latest_before_two.as_deref(), Some("c1"));
+    }
+
+    #[test]
+    fn delete_helpers_remove_rows_after_block() {
+        let mut conn = Connection::open_in_memory().expect("in-memory db");
+        let tx = conn
+            .transaction()
+            .expect("transaction creation should succeed");
+        create_rewards_table(&tx).expect("create rewards");
+        create_stats_table(&tx).expect("create stats");
+
+        tx.execute(
+            "INSERT INTO rewards (block_index, txid, vout, zero_count, reward) VALUES (?1, 'tx1', 0, 0, 1)",
+            params![1],
+        ).expect("insert reward 1");
+        tx.execute(
+            "INSERT INTO rewards (block_index, txid, vout, zero_count, reward) VALUES (?1, 'tx2', 0, 0, 1)",
+            params![2],
+        ).expect("insert reward 2");
+        tx.execute(
+            "INSERT INTO stats (block_index, block_stats, cumul_stats) VALUES (?1, 'b1', 'c1')",
+            params![1],
+        )
+        .expect("insert stats 1");
+        tx.execute(
+            "INSERT INTO stats (block_index, block_stats, cumul_stats) VALUES (?1, 'b2', 'c2')",
+            params![2],
+        )
+        .expect("insert stats 2");
+
+        delete_rewards_after_block(&tx, 1).expect("delete rewards");
+        delete_stats_after_block(&tx, 1).expect("delete stats");
+
+        let rewards_count: i64 = tx
+            .query_row("SELECT count(*) FROM rewards", [], |row| row.get(0))
+            .expect("rewards count");
+        let stats_count: i64 = tx
+            .query_row("SELECT count(*) FROM stats", [], |row| row.get(0))
+            .expect("stats count");
+
+        assert_eq!(rewards_count, 1);
+        assert_eq!(stats_count, 1);
+    }
+
+    #[test]
+    fn insert_reward_creates_row() {
+        let mut conn = Connection::open_in_memory().expect("in-memory db");
+        let tx = conn
+            .transaction()
+            .expect("transaction creation should succeed");
+        create_rewards_table(&tx).expect("create rewards");
+
+        insert_reward(&tx, 100, "txid123", 0, 5, 1000).expect("insert reward");
+
+        let count: i64 = tx
+            .query_row("SELECT count(*) FROM rewards", [], |row| row.get(0))
+            .expect("rewards count");
+        assert_eq!(count, 1);
+
+        let (txid, zero_count, reward): (String, i64, i64) = tx
+            .query_row(
+                "SELECT txid, zero_count, reward FROM rewards WHERE block_index = 100",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("fetch reward");
+        assert_eq!(txid, "txid123");
+        assert_eq!(zero_count, 5);
+        assert_eq!(reward, 1000);
+    }
+
+    #[test]
+    fn insert_stats_creates_row() {
+        let mut conn = Connection::open_in_memory().expect("in-memory db");
+        let tx = conn
+            .transaction()
+            .expect("transaction creation should succeed");
+        create_stats_table(&tx).expect("create stats");
+
+        insert_stats(&tx, 50, r#"{"key":"value"}"#, r#"{"cumul":"data"}"#).expect("insert stats");
+
+        let count: i64 = tx
+            .query_row("SELECT count(*) FROM stats", [], |row| row.get(0))
+            .expect("stats count");
+        assert_eq!(count, 1);
+
+        let (block_stats, cumul_stats): (String, String) = tx
+            .query_row(
+                "SELECT block_stats, cumul_stats FROM stats WHERE block_index = 50",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("fetch stats");
+        assert_eq!(block_stats, r#"{"key":"value"}"#);
+        assert_eq!(cumul_stats, r#"{"cumul":"data"}"#);
+    }
+
+    #[test]
+    fn select_latest_cumul_stats_returns_none_for_empty_table() {
+        let mut conn = Connection::open_in_memory().expect("in-memory db");
+        let tx = conn
+            .transaction()
+            .expect("transaction creation should succeed");
+        create_stats_table(&tx).expect("create stats");
+
+        let result = select_latest_cumul_stats(&tx, 100).expect("select");
+        assert!(result.is_none());
+    }
 }

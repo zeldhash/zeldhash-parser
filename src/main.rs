@@ -1,13 +1,45 @@
+//! # mhinparser
+//!
+//! A high-performance Bitcoin blockchain parser implementing the **My Hash Is Nice** protocol.
+//!
+//! This binary application parses the Bitcoin blockchain to track MHIN rewards,
+//! leveraging [`protoblock`](https://crates.io/crates/protoblock) for fast block
+//! fetching and [`rollblock`](https://crates.io/crates/rollblock) for efficient
+//! UTXO management with instant rollback support.
+//!
+//! ## Features
+//!
+//! - **High Performance** — Parallel block fetching with configurable thread pools
+//! - **Instant Rollbacks** — O(1) chain reorganization handling via rollblock
+//! - **Multi-Network** — Supports Mainnet, Testnet4, Signet, and Regtest
+//! - **Interactive UI** — Live progress display powered by ratatui
+//! - **Daemon Mode** — Background service with signal handling
+//!
+//! ## Usage
+//!
+//! ```bash
+//! # Parse mainnet
+//! mhinparser
+//!
+//! # Parse testnet4
+//! mhinparser --network testnet4
+//!
+//! # Run as daemon
+//! mhinparser --daemon
+//! ```
+//!
+//! See the [README](https://github.com/ouziel-slama/mhinparser) for full documentation.
+
 mod cli;
 mod config;
 mod parser;
 mod progress;
 mod stores;
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{anyhow, bail, Context, Result};
 use clap::Parser;
-use protoblock::Runner;
 use protoblock::runtime::config::FetcherConfig;
+use protoblock::Runner;
 use std::env;
 use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
@@ -19,11 +51,11 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tokio::runtime::Builder;
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::Directive;
+use tracing_subscriber::EnvFilter;
 
 use crate::cli::{Cli, Command as LifecycleCommand};
-use crate::config::{AppConfig, RuntimePaths, load_runtime_paths};
+use crate::config::{load_runtime_paths, AppConfig, RuntimePaths};
 use crate::parser::MhinParser;
 use crate::progress::ProgressReporter;
 use crate::stores::sqlite::DB_FILE_NAME;
@@ -142,7 +174,11 @@ fn utxo_endpoint(app_config: &AppConfig) -> String {
 
     match &store_config.remote_server {
         Some(settings) => {
-            let scheme = if settings.tls.is_some() { "https" } else { "http" };
+            let scheme = if settings.tls.is_some() {
+                "https"
+            } else {
+                "http"
+            };
             format!(
                 "{scheme}://{}:{}@{}",
                 settings.auth.username, settings.auth.password, settings.bind_address
@@ -399,5 +435,325 @@ fn wait_for_shutdown(pid: libc::pid_t, pid_path: &Path, timeout: Duration) -> bo
 fn cleanup_pid_file(pid_path: &Path) {
     if pid_path.exists() {
         let _ = fs::remove_file(pid_path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cli::{ProtoblockOptions, RollblockOptions};
+    use rollblock::{RemoteServerSettings, StoreConfig};
+    use std::net::SocketAddr;
+    use tempfile::TempDir;
+
+    fn build_cli(daemon: bool, daemon_child: bool) -> Cli {
+        Cli {
+            config: None,
+            network: None,
+            data_dir: None,
+            protoblock: ProtoblockOptions::default(),
+            rollblock: RollblockOptions::default(),
+            daemon,
+            daemon_child,
+            command: None,
+        }
+    }
+
+    fn build_app_config(data_dir: &Path, store_config: StoreConfig) -> AppConfig {
+        let protoblock = ProtoblockOptions::default()
+            .build(0)
+            .expect("default protoblock settings");
+        let runtime = RuntimePaths::prepare(data_dir).expect("runtime paths");
+        let mut rollblock = RollblockOptions::default()
+            .build(data_dir)
+            .expect("rollblock settings");
+        rollblock.store_config = store_config;
+
+        AppConfig {
+            config_file: None,
+            data_dir: data_dir.to_path_buf(),
+            network: mhinprotocol::MhinNetwork::Mainnet,
+            protoblock,
+            rollblock,
+            runtime,
+        }
+    }
+
+    #[test]
+    fn determine_launch_prefers_daemon_child_flag() {
+        let cli = build_cli(true, true);
+        assert!(matches!(determine_launch(&cli), LaunchMode::DaemonChild));
+    }
+
+    #[test]
+    fn determine_launch_uses_daemon_when_child_absent() {
+        let cli = build_cli(true, false);
+        assert!(matches!(determine_launch(&cli), LaunchMode::DaemonParent));
+    }
+
+    #[test]
+    fn determine_launch_defaults_to_foreground() {
+        let cli = build_cli(false, false);
+        assert!(matches!(determine_launch(&cli), LaunchMode::Foreground));
+    }
+
+    #[test]
+    fn utxo_endpoint_reports_disabled_server() {
+        let temp = TempDir::new().expect("temp dir");
+        let mut store_config = StoreConfig::existing(temp.path());
+        store_config.enable_server = false;
+        store_config.remote_server = None;
+
+        let app_config = build_app_config(temp.path(), store_config);
+        let endpoint = utxo_endpoint(&app_config);
+
+        assert!(
+            endpoint.starts_with("embedded rollblock server disabled"),
+            "should mention disabled embedded server"
+        );
+    }
+
+    #[test]
+    fn utxo_endpoint_formats_remote_settings() {
+        let temp = TempDir::new().expect("temp dir");
+        let mut store_config = StoreConfig::existing(temp.path());
+        let mut remote = RemoteServerSettings::default().with_basic_auth("user", "pass");
+        remote.bind_address = "127.0.0.1:9000"
+            .parse::<SocketAddr>()
+            .expect("parse socket address");
+        store_config.enable_server = true;
+        store_config.remote_server = Some(remote);
+
+        let app_config = build_app_config(temp.path(), store_config);
+        let endpoint = utxo_endpoint(&app_config);
+
+        assert_eq!(endpoint, "http://user:pass@127.0.0.1:9000");
+    }
+
+    #[test]
+    fn utxo_endpoint_formats_none_remote_settings() {
+        let temp = TempDir::new().expect("temp dir");
+        let mut store_config = StoreConfig::existing(temp.path());
+        store_config.enable_server = true;
+        store_config.remote_server = None;
+
+        let app_config = build_app_config(temp.path(), store_config);
+        let endpoint = utxo_endpoint(&app_config);
+
+        assert_eq!(endpoint, "embedded rollblock server settings unavailable");
+    }
+
+    #[test]
+    fn run_options_foreground_is_interactive() {
+        let opts = RunOptions::foreground();
+        assert!(opts.interactive);
+        assert!(opts.log_path.is_none());
+        assert!(opts.pid_file.is_none());
+    }
+
+    #[test]
+    fn run_options_daemon_child_uses_paths() {
+        let temp = TempDir::new().expect("temp dir");
+        let paths = RuntimePaths::prepare(temp.path()).expect("runtime paths");
+
+        let opts = RunOptions::daemon_child(&paths);
+        assert!(!opts.interactive);
+        assert!(opts.log_path.is_some());
+        assert!(opts.pid_file.is_some());
+
+        assert_eq!(opts.log_path.as_ref().unwrap(), paths.log_file());
+        assert_eq!(opts.pid_file.as_ref().unwrap(), paths.pid_file());
+    }
+
+    #[test]
+    fn pid_file_guard_removes_file_on_drop() {
+        let temp = TempDir::new().expect("temp dir");
+        let pid_path = temp.path().join("test.pid");
+        fs::write(&pid_path, "12345").expect("write pid");
+        assert!(pid_path.exists());
+
+        {
+            let _guard = PidFileGuard::new(pid_path.clone());
+        }
+
+        assert!(!pid_path.exists(), "pid file should be removed on drop");
+    }
+
+    #[test]
+    fn init_tracing_returns_ok_without_path() {
+        // Running this test in isolation should succeed
+        // Note: tracing subscriber can only be initialized once per process,
+        // so this may fail if another test already initialized it.
+        // We just check it doesn't panic.
+        let result = init_tracing(None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn init_tracing_with_log_path_creates_file() {
+        let temp = TempDir::new().expect("temp dir");
+        let log_path = temp.path().join("test.log");
+
+        let result = init_tracing(Some(&log_path));
+        assert!(result.is_ok());
+        assert!(log_path.exists(), "log file should be created");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn process_alive_returns_false_for_invalid_pid() {
+        // PID 0 is never valid for kill()
+        // A very high PID is unlikely to exist
+        assert!(!process_alive(999999999));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_pid_file_returns_none_for_missing_file() {
+        let temp = TempDir::new().expect("temp dir");
+        let missing_path = temp.path().join("nonexistent.pid");
+
+        let result = read_pid_file(&missing_path).expect("should not error");
+        assert!(result.is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_pid_file_parses_valid_pid() {
+        let temp = TempDir::new().expect("temp dir");
+        let pid_path = temp.path().join("valid.pid");
+        fs::write(&pid_path, "12345").expect("write pid");
+
+        let result = read_pid_file(&pid_path).expect("should parse");
+        assert_eq!(result, Some(12345));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_pid_file_creates_parent_dirs() {
+        let temp = TempDir::new().expect("temp dir");
+        let nested_path = temp.path().join("nested").join("dir").join("test.pid");
+
+        write_pid_file(&nested_path, 99999).expect("should create");
+        assert!(nested_path.exists());
+
+        let contents = fs::read_to_string(&nested_path).expect("read");
+        assert_eq!(contents, "99999");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cleanup_pid_file_removes_existing_file() {
+        let temp = TempDir::new().expect("temp dir");
+        let pid_path = temp.path().join("cleanup.pid");
+        fs::write(&pid_path, "12345").expect("write pid");
+        assert!(pid_path.exists());
+
+        cleanup_pid_file(&pid_path);
+        assert!(!pid_path.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cleanup_pid_file_handles_missing_file() {
+        let temp = TempDir::new().expect("temp dir");
+        let missing_path = temp.path().join("missing.pid");
+
+        // Should not panic or error
+        cleanup_pid_file(&missing_path);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ensure_pid_slot_allows_new_daemon_when_no_file() {
+        let temp = TempDir::new().expect("temp dir");
+        let pid_path = temp.path().join("new.pid");
+
+        let result = ensure_pid_slot(&pid_path);
+        assert!(result.is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ensure_pid_slot_cleans_stale_pid_file() {
+        let temp = TempDir::new().expect("temp dir");
+        let pid_path = temp.path().join("stale.pid");
+        // Write a PID that definitely doesn't exist
+        fs::write(&pid_path, "999999999").expect("write stale pid");
+        assert!(pid_path.exists());
+
+        let result = ensure_pid_slot(&pid_path);
+        assert!(result.is_ok());
+        // Stale file should be cleaned up
+        assert!(!pid_path.exists());
+    }
+
+    #[test]
+    fn utxo_endpoint_formats_remote_settings_with_tls() {
+        let temp = TempDir::new().expect("temp dir");
+        let mut store_config = StoreConfig::existing(temp.path());
+        let mut remote = RemoteServerSettings::default().with_basic_auth("user", "pass");
+        remote.bind_address = "127.0.0.1:9000"
+            .parse::<SocketAddr>()
+            .expect("parse socket address");
+        // Simulate TLS enabled by creating a dummy TlsConfig through the builder
+        remote = remote.with_tls("cert.pem", "key.pem");
+        store_config.enable_server = true;
+        store_config.remote_server = Some(remote);
+
+        let app_config = build_app_config(temp.path(), store_config);
+        let endpoint = utxo_endpoint(&app_config);
+
+        assert_eq!(endpoint, "https://user:pass@127.0.0.1:9000");
+    }
+
+    #[test]
+    fn launch_mode_variants_are_distinct() {
+        let foreground = LaunchMode::Foreground;
+        let daemon_parent = LaunchMode::DaemonParent;
+        let daemon_child = LaunchMode::DaemonChild;
+
+        // Just verify the variants exist and can be matched
+        assert!(matches!(foreground, LaunchMode::Foreground));
+        assert!(matches!(daemon_parent, LaunchMode::DaemonParent));
+        assert!(matches!(daemon_child, LaunchMode::DaemonChild));
+    }
+
+    #[test]
+    fn run_options_fields_are_accessible() {
+        let opts = RunOptions::foreground();
+        assert!(opts.interactive);
+        assert!(opts.log_path.is_none());
+        assert!(opts.pid_file.is_none());
+    }
+
+    #[test]
+    fn pid_file_guard_new_creates_guard() {
+        let temp = TempDir::new().expect("temp dir");
+        let pid_path = temp.path().join("guard_test.pid");
+        fs::write(&pid_path, "12345").expect("write pid");
+
+        let guard = PidFileGuard::new(pid_path.clone());
+        assert!(pid_path.exists());
+
+        drop(guard);
+        assert!(!pid_path.exists(), "file should be removed on drop");
+    }
+
+    #[test]
+    fn determine_launch_all_combinations() {
+        // Test all combinations
+        let cli_ff = build_cli(false, false);
+        let cli_tf = build_cli(true, false);
+        let cli_ft = build_cli(false, true);
+        let cli_tt = build_cli(true, true);
+
+        assert!(matches!(determine_launch(&cli_ff), LaunchMode::Foreground));
+        assert!(matches!(
+            determine_launch(&cli_tf),
+            LaunchMode::DaemonParent
+        ));
+        assert!(matches!(determine_launch(&cli_ft), LaunchMode::DaemonChild));
+        assert!(matches!(determine_launch(&cli_tt), LaunchMode::DaemonChild));
     }
 }

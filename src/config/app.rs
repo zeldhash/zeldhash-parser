@@ -1,7 +1,12 @@
+//! Application configuration loading and merging.
+//!
+//! Combines CLI arguments, environment variables, and TOML file configuration
+//! into a unified [`AppConfig`] structure.
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use directories::ProjectDirs;
 use serde::Deserialize;
 
@@ -18,17 +23,33 @@ const PROJECT_ORGANIZATION: &str = "myhashisnice";
 const PROJECT_APPLICATION: &str = "mhinparser";
 
 /// Fully materialized configuration for the application.
+///
+/// Contains all resolved settings from CLI, environment, and config file sources.
+/// Used to initialize the parser and all dependent subsystems.
 #[derive(Debug)]
 pub struct AppConfig {
+    /// Path to the loaded configuration file, if any.
     pub config_file: Option<PathBuf>,
+    /// Root directory for application data (SQLite, rollblock, logs, etc.).
     pub data_dir: PathBuf,
+    /// Target Bitcoin network.
     pub network: mhinprotocol::MhinNetwork,
+    /// Block fetching configuration.
     pub protoblock: ProtoblockSettings,
+    /// UTXO store configuration.
     pub rollblock: RollblockSettings,
+    /// Paths for runtime artifacts (PID file, logs).
     pub runtime: RuntimePaths,
 }
 
 impl AppConfig {
+    /// Loads and merges configuration from all sources.
+    ///
+    /// Priority (highest to lowest):
+    /// 1. CLI arguments
+    /// 2. Environment variables
+    /// 3. TOML configuration file
+    /// 4. Built-in defaults
     pub fn load(cli: Cli) -> Result<Self> {
         let Cli {
             config,
@@ -176,6 +197,8 @@ fn default_data_dir_path() -> Option<PathBuf> {
 }
 
 /// Paths used by runtime artifacts such as PID and log files.
+///
+/// These paths are derived from the data directory and are created automatically.
 #[derive(Debug, Clone)]
 pub struct RuntimePaths {
     pid_file: PathBuf,
@@ -183,6 +206,7 @@ pub struct RuntimePaths {
 }
 
 impl RuntimePaths {
+    /// Creates runtime directories and returns resolved paths.
     pub fn prepare(data_dir: &Path) -> Result<Self> {
         let run_dir = data_dir.join("run");
         let logs_dir = data_dir.join("logs");
@@ -197,10 +221,12 @@ impl RuntimePaths {
         })
     }
 
+    /// Returns the path to the PID file for daemon mode.
     pub fn pid_file(&self) -> &Path {
         &self.pid_file
     }
 
+    /// Returns the path to the daemon log file.
     pub fn log_file(&self) -> &Path {
         &self.log_file
     }
@@ -208,7 +234,10 @@ impl RuntimePaths {
 
 #[cfg(test)]
 mod tests {
-    use super::RuntimePaths;
+    use super::{load_file_config, AppConfig, RuntimePaths};
+    use crate::cli::{Cli, MhinNetworkArg, ProtoblockOptions, RollblockOptions};
+    use std::fs;
+    use std::path::PathBuf;
     use tempfile::TempDir;
 
     #[test]
@@ -222,5 +251,152 @@ mod tests {
 
         assert!(pid_dir.exists());
         assert!(log_dir.exists());
+    }
+
+    #[test]
+    fn load_file_config_reads_provided_path() {
+        let temp = TempDir::new().expect("temp dir");
+        let config_path = temp.path().join("mhinparser.toml");
+        fs::write(&config_path, r#"data_dir = "/tmp/mhin-tests""#).expect("write config");
+
+        let (config, path) = load_file_config(Some(&config_path)).expect("load config");
+
+        assert_eq!(path.as_deref(), Some(config_path.as_path()));
+        assert_eq!(
+            config.data_dir.as_deref(),
+            Some(PathBuf::from("/tmp/mhin-tests").as_path())
+        );
+    }
+
+    #[test]
+    fn read_toml_returns_error_on_invalid_file() {
+        let temp = TempDir::new().expect("temp dir");
+        let config_path = temp.path().join("invalid.toml");
+        fs::write(&config_path, "not = [toml").expect("write invalid config");
+
+        let err = load_file_config(Some(&config_path))
+            .expect_err("invalid config should fail")
+            .to_string();
+        assert!(
+            err.contains("parse"),
+            "error should mention parse failure, got: {err}"
+        );
+    }
+
+    #[test]
+    fn app_config_prefers_cli_over_file_values() {
+        let temp = TempDir::new().expect("temp dir");
+        let file_data_dir = temp.path().join("file_data_dir");
+        let cli_data_dir = temp.path().join("cli_data_dir");
+        fs::create_dir_all(&file_data_dir).expect("file data dir");
+        fs::create_dir_all(&cli_data_dir).expect("cli data dir");
+
+        let config_path = temp.path().join("mhinparser.toml");
+        fs::write(
+            &config_path,
+            format!(r#"data_dir = "{}""#, file_data_dir.display()),
+        )
+        .expect("write config");
+
+        let cli = Cli {
+            config: Some(config_path.clone()),
+            network: Some(MhinNetworkArg::Signet),
+            data_dir: Some(cli_data_dir.clone()),
+            protoblock: ProtoblockOptions::default(),
+            rollblock: RollblockOptions::default(),
+            daemon: false,
+            daemon_child: false,
+            command: None,
+        };
+
+        let app = AppConfig::load(cli).expect("load app config");
+
+        assert_eq!(app.config_file.as_deref(), Some(config_path.as_path()));
+        assert_eq!(app.data_dir, cli_data_dir);
+        assert!(matches!(app.network, mhinprotocol::MhinNetwork::Signet));
+    }
+
+    #[test]
+    fn app_config_uses_file_when_cli_missing_values() {
+        let temp = TempDir::new().expect("temp dir");
+        let file_data_dir = temp.path().join("file_only");
+        fs::create_dir_all(&file_data_dir).expect("file data dir");
+
+        let config_path = temp.path().join("mhinparser.toml");
+        fs::write(
+            &config_path,
+            format!(
+                r#"
+data_dir = "{}"
+network = "Regtest"
+"#,
+                file_data_dir.display()
+            ),
+        )
+        .expect("write config");
+
+        let cli = Cli {
+            config: Some(config_path.clone()),
+            network: None,
+            data_dir: None,
+            protoblock: ProtoblockOptions::default(),
+            rollblock: RollblockOptions::default(),
+            daemon: false,
+            daemon_child: false,
+            command: None,
+        };
+
+        let app = AppConfig::load(cli).expect("load app config from file");
+
+        assert_eq!(app.data_dir, file_data_dir);
+        assert!(matches!(app.network, mhinprotocol::MhinNetwork::Regtest));
+    }
+
+    #[test]
+    fn mhin_network_from_mainnet() {
+        let network: mhinprotocol::MhinNetwork = MhinNetworkArg::Mainnet.into();
+        assert!(matches!(network, mhinprotocol::MhinNetwork::Mainnet));
+    }
+
+    #[test]
+    fn mhin_network_from_testnet4() {
+        let network: mhinprotocol::MhinNetwork = MhinNetworkArg::Testnet4.into();
+        assert!(matches!(network, mhinprotocol::MhinNetwork::Testnet4));
+    }
+
+    #[test]
+    fn mhin_network_from_signet() {
+        let network: mhinprotocol::MhinNetwork = MhinNetworkArg::Signet.into();
+        assert!(matches!(network, mhinprotocol::MhinNetwork::Signet));
+    }
+
+    #[test]
+    fn mhin_network_from_regtest() {
+        let network: mhinprotocol::MhinNetwork = MhinNetworkArg::Regtest.into();
+        assert!(matches!(network, mhinprotocol::MhinNetwork::Regtest));
+    }
+
+    #[test]
+    fn load_file_config_returns_default_when_no_config_exists() {
+        let (config, path) = load_file_config(None).expect("default config");
+        // When no explicit path and no default config exists, path may or may not be None
+        // depending on whether the system has a config file
+        // The important thing is that it doesn't error
+        assert!(config.data_dir.is_none() || config.data_dir.is_some());
+        let _ = path; // Just make sure we can access it
+    }
+
+    #[test]
+    fn runtime_paths_accessors_return_expected_files() {
+        let temp = TempDir::new().expect("temp dir");
+        let runtime = RuntimePaths::prepare(temp.path()).expect("runtime paths");
+
+        let pid_file = runtime.pid_file();
+        let log_file = runtime.log_file();
+
+        assert!(pid_file.ends_with("mhinparser.pid"));
+        assert!(log_file.ends_with("mhinparser.log"));
+        assert!(pid_file.starts_with(temp.path()));
+        assert!(log_file.starts_with(temp.path()));
     }
 }

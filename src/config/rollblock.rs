@@ -1,16 +1,17 @@
 use std::path::Path;
 
-use anyhow::{Context, Result, anyhow};
-use rand::{Rng, distr::Alphanumeric};
+use anyhow::{anyhow, Context, Result};
+use rand::{distr::Alphanumeric, Rng};
 use rollblock::{
-    MhinStoreBlockFacade, RemoteServerSettings, StoreConfig, orchestrator::DurabilityMode,
+    orchestrator::DurabilityMode, MhinStoreBlockFacade, RemoteServerSettings, StoreConfig,
 };
 
 use crate::cli::{
+    RollblockDurabilityKind, RollblockMode, RollblockOptions,
     DEFAULT_ROLLBLOCK_ASYNC_MAX_PENDING_BLOCKS, DEFAULT_ROLLBLOCK_ASYNC_RELAXED_SYNC_EVERY,
     DEFAULT_ROLLBLOCK_COMPRESS_JOURNAL, DEFAULT_ROLLBLOCK_INITIAL_CAPACITY,
     DEFAULT_ROLLBLOCK_SHARDS_COUNT, DEFAULT_ROLLBLOCK_SYNCHRONOUS_RELAXED_SYNC_EVERY,
-    DEFAULT_ROLLBLOCK_THREAD_COUNT, RollblockDurabilityKind, RollblockMode, RollblockOptions,
+    DEFAULT_ROLLBLOCK_THREAD_COUNT,
 };
 
 use super::overlay::Overlay;
@@ -135,8 +136,8 @@ impl RollblockOptions {
 
         let remote_username = EMBEDDED_REMOTE_USERNAME.to_string();
         let remote_password = generate_remote_password();
-        let remote_settings = RemoteServerSettings::default()
-            .with_basic_auth(remote_username, remote_password);
+        let remote_settings =
+            RemoteServerSettings::default().with_basic_auth(remote_username, remote_password);
         config = config.with_remote_server(remote_settings);
         config = config
             .enable_remote_server()
@@ -240,5 +241,275 @@ mod tests {
             .determine_start_height()
             .expect("start height should default to 0 for new stores");
         assert_eq!(start_height, 0);
+    }
+
+    #[test]
+    fn overlay_prefers_override_and_keeps_base_when_missing() {
+        let base = RollblockOptions {
+            thread_count: Some(2),
+            compress_journal: Some(false),
+            async_max_pending_blocks: Some(10),
+            ..Default::default()
+        };
+        let overrides = RollblockOptions {
+            thread_count: Some(8),
+            compress_journal: None,
+            async_max_pending_blocks: Some(20),
+            ..Default::default()
+        };
+
+        let merged = base.overlay(overrides);
+
+        assert_eq!(merged.thread_count, Some(8));
+        assert_eq!(
+            merged.compress_journal,
+            Some(false),
+            "should retain base when override missing"
+        );
+        assert_eq!(merged.async_max_pending_blocks, Some(20));
+    }
+
+    #[test]
+    fn generate_remote_password_matches_policy() {
+        let password = generate_remote_password();
+
+        assert_eq!(password.len(), EMBEDDED_REMOTE_PASSWORD_LEN);
+        assert!(
+            password.chars().all(|c| c.is_ascii_alphanumeric()),
+            "password should remain alphanumeric for basic auth"
+        );
+    }
+
+    #[test]
+    fn build_existing_store_requires_capacity_when_overriding_shards() {
+        let temp = tempdir().expect("tempdir should be created");
+        let utxodb_path = temp.path().join("utxodb");
+        std::fs::create_dir_all(&utxodb_path).expect("create utxodb dir");
+
+        let options = RollblockOptions {
+            shards_count: Some(8),
+            // Missing initial_capacity should trigger the validation error.
+            initial_capacity: None,
+            ..Default::default()
+        };
+
+        let err = options
+            .build(temp.path())
+            .expect_err("should fail without capacity override");
+        assert!(
+            err.to_string()
+                .contains("rollblock_initial_capacity is required"),
+            "error should mention missing capacity, got: {err}"
+        );
+    }
+
+    #[test]
+    fn build_new_store_applies_defaults() {
+        let temp = tempdir().expect("tempdir should be created");
+        let options = RollblockOptions::default();
+        let settings = options.build(temp.path()).expect("build settings");
+
+        assert!(matches!(settings.mode, RollblockMode::New));
+        // Just verify it built successfully with a new store
+        assert!(settings.store_config.enable_server);
+    }
+
+    #[test]
+    fn build_applies_durability_mode_async() {
+        let temp = tempdir().expect("tempdir should be created");
+        let options = RollblockOptions {
+            durability_mode: Some(RollblockDurabilityKind::Async),
+            ..Default::default()
+        };
+        let settings = options.build(temp.path()).expect("build settings");
+
+        assert!(matches!(settings.mode, RollblockMode::New));
+        // Just verify it builds successfully with this mode
+        assert!(settings.store_config.enable_server);
+    }
+
+    #[test]
+    fn build_applies_durability_mode_synchronous() {
+        let temp = tempdir().expect("tempdir should be created");
+        let options = RollblockOptions {
+            durability_mode: Some(RollblockDurabilityKind::Synchronous),
+            ..Default::default()
+        };
+        let settings = options.build(temp.path()).expect("build settings");
+
+        assert!(matches!(settings.mode, RollblockMode::New));
+    }
+
+    #[test]
+    fn build_applies_durability_mode_synchronous_relaxed() {
+        let temp = tempdir().expect("tempdir should be created");
+        let options = RollblockOptions {
+            durability_mode: Some(RollblockDurabilityKind::SynchronousRelaxed),
+            synchronous_relaxed_sync_every: Some(50),
+            ..Default::default()
+        };
+        let settings = options.build(temp.path()).expect("build settings");
+
+        assert!(matches!(settings.mode, RollblockMode::New));
+    }
+
+    #[test]
+    fn build_applies_optional_snapshot_interval() {
+        use std::time::Duration;
+
+        let temp = tempdir().expect("tempdir should be created");
+        let options = RollblockOptions {
+            snapshot_interval: Some(Duration::from_secs(300)),
+            ..Default::default()
+        };
+        let settings = options.build(temp.path()).expect("build settings");
+
+        assert!(matches!(settings.mode, RollblockMode::New));
+    }
+
+    #[test]
+    fn build_applies_optional_max_snapshot_interval() {
+        use std::time::Duration;
+
+        let temp = tempdir().expect("tempdir should be created");
+        let options = RollblockOptions {
+            max_snapshot_interval: Some(Duration::from_secs(600)),
+            ..Default::default()
+        };
+        let settings = options.build(temp.path()).expect("build settings");
+
+        assert!(matches!(settings.mode, RollblockMode::New));
+    }
+
+    #[test]
+    fn build_applies_optional_journal_compression_level() {
+        let temp = tempdir().expect("tempdir should be created");
+        let options = RollblockOptions {
+            journal_compression_level: Some(3),
+            ..Default::default()
+        };
+        let settings = options.build(temp.path()).expect("build settings");
+
+        assert!(matches!(settings.mode, RollblockMode::New));
+    }
+
+    #[test]
+    fn build_applies_optional_journal_chunk_size_bytes() {
+        let temp = tempdir().expect("tempdir should be created");
+        let options = RollblockOptions {
+            journal_chunk_size_bytes: Some(1024 * 1024),
+            ..Default::default()
+        };
+        let settings = options.build(temp.path()).expect("build settings");
+
+        assert!(matches!(settings.mode, RollblockMode::New));
+    }
+
+    #[test]
+    fn build_applies_optional_lmdb_map_size() {
+        let temp = tempdir().expect("tempdir should be created");
+        let options = RollblockOptions {
+            lmdb_map_size: Some(1024 * 1024 * 1024),
+            ..Default::default()
+        };
+        let settings = options.build(temp.path()).expect("build settings");
+
+        assert!(matches!(settings.mode, RollblockMode::New));
+    }
+
+    #[test]
+    fn build_applies_optional_min_rollback_window() {
+        let temp = tempdir().expect("tempdir should be created");
+        let options = RollblockOptions {
+            min_rollback_window: Some(100),
+            ..Default::default()
+        };
+        let settings = options.build(temp.path()).expect("build settings");
+
+        assert!(matches!(settings.mode, RollblockMode::New));
+    }
+
+    #[test]
+    fn build_applies_optional_prune_interval() {
+        use std::time::Duration;
+
+        let temp = tempdir().expect("tempdir should be created");
+        let options = RollblockOptions {
+            prune_interval: Some(Duration::from_secs(3600)),
+            ..Default::default()
+        };
+        let settings = options.build(temp.path()).expect("build settings");
+
+        assert!(matches!(settings.mode, RollblockMode::New));
+    }
+
+    #[test]
+    fn build_applies_optional_bootstrap_block_profile() {
+        let temp = tempdir().expect("tempdir should be created");
+        let options = RollblockOptions {
+            bootstrap_block_profile: Some(1000),
+            ..Default::default()
+        };
+        let settings = options.build(temp.path()).expect("build settings");
+
+        assert!(matches!(settings.mode, RollblockMode::New));
+    }
+
+    #[test]
+    fn rollblock_mode_default_is_existing() {
+        let mode = RollblockMode::default();
+        assert!(matches!(mode, RollblockMode::Existing));
+    }
+
+    #[test]
+    fn overlay_handles_all_optional_fields() {
+        use std::time::Duration;
+
+        let base = RollblockOptions {
+            shards_count: Some(8),
+            initial_capacity: Some(1_000_000),
+            thread_count: Some(4),
+            compress_journal: Some(true),
+            snapshot_interval: Some(Duration::from_secs(60)),
+            max_snapshot_interval: Some(Duration::from_secs(120)),
+            journal_compression_level: Some(3),
+            journal_chunk_size_bytes: Some(1024),
+            lmdb_map_size: Some(1024 * 1024),
+            min_rollback_window: Some(50),
+            prune_interval: Some(Duration::from_secs(300)),
+            bootstrap_block_profile: Some(500),
+            durability_mode: Some(RollblockDurabilityKind::Async),
+            async_max_pending_blocks: Some(100),
+            async_relaxed_sync_every: Some(10),
+            synchronous_relaxed_sync_every: Some(5),
+        };
+
+        let overrides = RollblockOptions {
+            shards_count: Some(16),
+            // Leave others as None to test preservation
+            ..Default::default()
+        };
+
+        let merged = base.overlay(overrides);
+
+        assert_eq!(merged.shards_count, Some(16));
+        assert_eq!(merged.initial_capacity, Some(1_000_000));
+        assert_eq!(merged.thread_count, Some(4));
+        assert_eq!(merged.compress_journal, Some(true));
+        assert_eq!(merged.snapshot_interval, Some(Duration::from_secs(60)));
+        assert_eq!(merged.max_snapshot_interval, Some(Duration::from_secs(120)));
+        assert_eq!(merged.journal_compression_level, Some(3));
+        assert_eq!(merged.journal_chunk_size_bytes, Some(1024));
+        assert_eq!(merged.lmdb_map_size, Some(1024 * 1024));
+        assert_eq!(merged.min_rollback_window, Some(50));
+        assert_eq!(merged.prune_interval, Some(Duration::from_secs(300)));
+        assert_eq!(merged.bootstrap_block_profile, Some(500));
+        assert!(matches!(
+            merged.durability_mode,
+            Some(RollblockDurabilityKind::Async)
+        ));
+        assert_eq!(merged.async_max_pending_blocks, Some(100));
+        assert_eq!(merged.async_relaxed_sync_every, Some(10));
+        assert_eq!(merged.synchronous_relaxed_sync_every, Some(5));
     }
 }

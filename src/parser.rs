@@ -1,6 +1,15 @@
+//! Core block processing logic for the MHIN protocol.
+//!
+//! This module implements the [`BlockProtocol`] trait from protoblock,
+//! providing the main parsing pipeline that:
+//!
+//! 1. Pre-processes blocks in parallel to extract MHIN-relevant data
+//! 2. Processes blocks sequentially to update the UTXO set and statistics
+//! 3. Handles chain reorganizations through rollback support
+
 use crate::config::AppConfig;
 use crate::progress::ProgressHandle;
-use crate::stores::sqlite::{SqliteStore, get_read_write_connection};
+use crate::stores::sqlite::{get_read_write_connection, SqliteStore};
 use crate::stores::utxo::UTXOStore;
 use anyhow::{Context, Result};
 use bitcoin::Block;
@@ -173,5 +182,237 @@ impl QueueByteSize for PreProcessedBlock {
         }
 
         total
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bitcoin::{hashes::Hash, Txid};
+    use core::mem::size_of;
+
+    fn sample_tx(id: u8, inputs: usize, outputs: usize) -> MhinTransaction {
+        let txid = Txid::from_slice(&[id; 32]).expect("txid");
+        let inputs = (0..inputs)
+            .map(|i| MhinInput {
+                utxo_key: [i as u8; 8],
+            })
+            .collect();
+        let outputs = (0..outputs)
+            .map(|i| MhinOutput {
+                utxo_key: [i as u8; 8],
+                value: 1,
+                reward: 1,
+                distribution: 0,
+                vout: i as u32,
+            })
+            .collect();
+
+        MhinTransaction {
+            txid,
+            inputs,
+            outputs,
+            zero_count: id,
+            reward: 1,
+            has_op_return_distribution: false,
+        }
+    }
+
+    #[test]
+    fn queue_bytes_counts_transactions_inputs_and_outputs() {
+        let block = PreProcessedMhinBlock {
+            transactions: vec![sample_tx(1, 1, 2), sample_tx(2, 2, 1)],
+            max_zero_count: 2,
+        };
+        let pre_processed = PreProcessedBlock::new(block.clone());
+
+        let mut expected = size_of::<PreProcessedMhinBlock>();
+        for tx in &block.transactions {
+            expected += size_of::<MhinTransaction>();
+            expected += tx.inputs.len() * size_of::<MhinInput>();
+            expected += tx.outputs.len() * size_of::<MhinOutput>();
+        }
+
+        assert_eq!(pre_processed.queue_bytes(), expected);
+    }
+
+    #[test]
+    fn pre_processed_block_into_inner_returns_original() {
+        let block = PreProcessedMhinBlock {
+            transactions: vec![sample_tx(3, 2, 3)],
+            max_zero_count: 5,
+        };
+        let pre_processed = PreProcessedBlock::new(block.clone());
+        let recovered = pre_processed.into_inner();
+
+        assert_eq!(recovered.transactions.len(), 1);
+        assert_eq!(recovered.max_zero_count, 5);
+    }
+
+    #[test]
+    fn pre_processed_block_is_clone() {
+        let block = PreProcessedMhinBlock {
+            transactions: vec![sample_tx(1, 1, 1)],
+            max_zero_count: 1,
+        };
+        let pre_processed = PreProcessedBlock::new(block);
+        let cloned = pre_processed.clone();
+
+        assert_eq!(pre_processed.queue_bytes(), cloned.queue_bytes());
+    }
+
+    #[test]
+    fn queue_bytes_handles_empty_block() {
+        let block = PreProcessedMhinBlock {
+            transactions: vec![],
+            max_zero_count: 0,
+        };
+        let pre_processed = PreProcessedBlock::new(block);
+
+        // Empty block should just be the size of PreProcessedMhinBlock itself
+        assert_eq!(
+            pre_processed.queue_bytes(),
+            size_of::<PreProcessedMhinBlock>()
+        );
+    }
+
+    #[test]
+    fn queue_bytes_handles_many_inputs_outputs() {
+        let block = PreProcessedMhinBlock {
+            transactions: vec![sample_tx(1, 100, 200)],
+            max_zero_count: 1,
+        };
+        let pre_processed = PreProcessedBlock::new(block);
+
+        let expected = size_of::<PreProcessedMhinBlock>()
+            + size_of::<MhinTransaction>()
+            + 100 * size_of::<MhinInput>()
+            + 200 * size_of::<MhinOutput>();
+
+        assert_eq!(pre_processed.queue_bytes(), expected);
+    }
+
+    #[test]
+    fn pre_processed_block_new_creates_wrapper() {
+        let block = PreProcessedMhinBlock {
+            transactions: vec![],
+            max_zero_count: 0,
+        };
+        let pre_processed = PreProcessedBlock::new(block);
+        assert_eq!(
+            pre_processed.queue_bytes(),
+            size_of::<PreProcessedMhinBlock>()
+        );
+    }
+
+    #[test]
+    fn sample_tx_creates_valid_transaction() {
+        let tx = sample_tx(5, 3, 4);
+        assert_eq!(tx.inputs.len(), 3);
+        assert_eq!(tx.outputs.len(), 4);
+        assert_eq!(tx.zero_count, 5);
+    }
+
+    #[test]
+    fn queue_bytes_with_multiple_transactions() {
+        let block = PreProcessedMhinBlock {
+            transactions: vec![sample_tx(1, 2, 3), sample_tx(2, 4, 5), sample_tx(3, 6, 7)],
+            max_zero_count: 3,
+        };
+        let pre_processed = PreProcessedBlock::new(block.clone());
+
+        let mut expected = size_of::<PreProcessedMhinBlock>();
+        for tx in &block.transactions {
+            expected += size_of::<MhinTransaction>();
+            expected += tx.inputs.len() * size_of::<MhinInput>();
+            expected += tx.outputs.len() * size_of::<MhinOutput>();
+        }
+
+        assert_eq!(pre_processed.queue_bytes(), expected);
+    }
+
+    #[test]
+    fn pre_processed_block_clone_preserves_data() {
+        let block = PreProcessedMhinBlock {
+            transactions: vec![sample_tx(2, 1, 2)],
+            max_zero_count: 2,
+        };
+        let original = PreProcessedBlock::new(block);
+        let cloned = original.clone();
+
+        assert_eq!(original.queue_bytes(), cloned.queue_bytes());
+        assert_eq!(original.inner.max_zero_count, cloned.inner.max_zero_count);
+        assert_eq!(
+            original.inner.transactions.len(),
+            cloned.inner.transactions.len()
+        );
+    }
+
+    #[test]
+    fn queue_bytes_handles_transaction_with_no_inputs() {
+        let tx = MhinTransaction {
+            txid: Txid::from_slice(&[1u8; 32]).expect("txid"),
+            inputs: vec![],
+            outputs: vec![MhinOutput {
+                utxo_key: [0u8; 8],
+                value: 100,
+                reward: 10,
+                distribution: 0,
+                vout: 0,
+            }],
+            zero_count: 1,
+            reward: 10,
+            has_op_return_distribution: false,
+        };
+
+        let block = PreProcessedMhinBlock {
+            transactions: vec![tx],
+            max_zero_count: 1,
+        };
+        let pre_processed = PreProcessedBlock::new(block);
+
+        let expected = size_of::<PreProcessedMhinBlock>()
+            + size_of::<MhinTransaction>()
+            + size_of::<MhinOutput>();
+
+        assert_eq!(pre_processed.queue_bytes(), expected);
+    }
+
+    #[test]
+    fn queue_bytes_handles_transaction_with_no_outputs() {
+        let tx = MhinTransaction {
+            txid: Txid::from_slice(&[2u8; 32]).expect("txid"),
+            inputs: vec![MhinInput { utxo_key: [1u8; 8] }],
+            outputs: vec![],
+            zero_count: 0,
+            reward: 0,
+            has_op_return_distribution: false,
+        };
+
+        let block = PreProcessedMhinBlock {
+            transactions: vec![tx],
+            max_zero_count: 0,
+        };
+        let pre_processed = PreProcessedBlock::new(block);
+
+        let expected = size_of::<PreProcessedMhinBlock>()
+            + size_of::<MhinTransaction>()
+            + size_of::<MhinInput>();
+
+        assert_eq!(pre_processed.queue_bytes(), expected);
+    }
+
+    #[test]
+    fn pre_processed_block_inner_access() {
+        let block = PreProcessedMhinBlock {
+            transactions: vec![sample_tx(5, 2, 3)],
+            max_zero_count: 5,
+        };
+        let pre_processed = PreProcessedBlock::new(block);
+
+        // Access inner directly
+        assert_eq!(pre_processed.inner.max_zero_count, 5);
+        assert_eq!(pre_processed.inner.transactions.len(), 1);
+        assert_eq!(pre_processed.inner.transactions[0].zero_count, 5);
     }
 }

@@ -1,8 +1,14 @@
+//! SQLite storage for MHIN block statistics and rewards.
+//!
+//! Persists per-block statistics and cumulative protocol metrics in a local
+//! SQLite database. The data is used for querying historical MHIN protocol
+//! state and displaying progress information.
+
 use std::fs;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use mhinprotocol::types::{Amount, ProcessedMhinBlock};
 use rusqlite::{Connection, Transaction};
 use serde::{Deserialize, Serialize};
@@ -11,6 +17,7 @@ use super::queries;
 
 static LATEST_CUMULATIVE: OnceLock<Mutex<Option<CumulativeStats>>> = OnceLock::new();
 
+/// Default filename for the SQLite statistics database.
 pub const DB_FILE_NAME: &str = "mhinstats.sqlite3";
 
 /// Opens (and creates when missing) the SQLite database used to persist block data.
@@ -232,6 +239,10 @@ impl BlockStats {
     }
 }
 
+/// Cumulative statistics aggregated across all processed blocks.
+///
+/// Tracks running totals for MHIN protocol metrics including total rewards,
+/// maximum zero count observed, and UTXO activity.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct CumulativeStats {
     block_index: u64,
@@ -245,39 +256,472 @@ pub struct CumulativeStats {
 }
 
 impl CumulativeStats {
+    /// Returns the height of the last processed block.
     pub fn block_index(&self) -> u64 {
         self.block_index
     }
 
+    /// Returns the total number of blocks processed.
     pub fn block_count(&self) -> u64 {
         self.block_count
     }
 
+    /// Returns the cumulative MHIN reward in satoshis.
     pub fn total_reward(&self) -> &Amount {
         &self.total_reward
     }
 
+    /// Returns the total count of individual rewards across all blocks.
     pub fn reward_count(&self) -> u64 {
         self.reward_count
     }
 
+    /// Returns the highest zero count observed in any transaction hash.
     pub fn max_zero_count(&self) -> u8 {
         self.max_zero_count
     }
 
+    /// Returns the transaction ID with the highest zero count ("nicest" hash).
     pub fn nicest_txid(&self) -> Option<&str> {
         self.nicest_txid.as_deref()
     }
 
+    /// Returns the cumulative count of UTXOs spent.
     pub fn utxo_spent_count(&self) -> u64 {
         self.utxo_spent_count
     }
 
+    /// Returns the cumulative count of new UTXOs created.
     pub fn new_utxo_count(&self) -> u64 {
         self.new_utxo_count
+    }
+
+    /// Returns a builder for creating `CumulativeStats` instances in tests.
+    #[cfg(test)]
+    pub(crate) fn builder() -> CumulativeStatsBuilder {
+        CumulativeStatsBuilder::default()
+    }
+}
+
+/// Builder for creating `CumulativeStats` instances in tests.
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct CumulativeStatsBuilder {
+    inner: CumulativeStats,
+}
+
+#[cfg(test)]
+impl CumulativeStatsBuilder {
+    pub fn block_index(mut self, value: u64) -> Self {
+        self.inner.block_index = value;
+        self
+    }
+
+    pub fn block_count(mut self, value: u64) -> Self {
+        self.inner.block_count = value;
+        self
+    }
+
+    pub fn total_reward(mut self, value: impl Into<Amount>) -> Self {
+        self.inner.total_reward = value.into();
+        self
+    }
+
+    pub fn reward_count(mut self, value: u64) -> Self {
+        self.inner.reward_count = value;
+        self
+    }
+
+    pub fn max_zero_count(mut self, value: u8) -> Self {
+        self.inner.max_zero_count = value;
+        self
+    }
+
+    pub fn nicest_txid(mut self, value: Option<String>) -> Self {
+        self.inner.nicest_txid = value;
+        self
+    }
+
+    pub fn utxo_spent_count(mut self, value: u64) -> Self {
+        self.inner.utxo_spent_count = value;
+        self
+    }
+
+    pub fn new_utxo_count(mut self, value: u64) -> Self {
+        self.inner.new_utxo_count = value;
+        self
+    }
+
+    pub fn build(self) -> CumulativeStats {
+        self.inner
     }
 }
 
 fn to_sql_i64(value: u64, field: &str) -> Result<i64> {
     i64::try_from(value).map_err(|_| anyhow!("{field} value {value} overflows SQLite INTEGER"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{to_sql_i64, BlockStats, CumulativeStats, SqliteStore};
+    use crate::stores::queries;
+    use rusqlite::{params, Connection};
+
+    #[test]
+    fn to_sql_i64_accepts_in_range_values() {
+        assert_eq!(to_sql_i64(42, "example").expect("convert"), 42);
+    }
+
+    #[test]
+    fn to_sql_i64_errors_on_overflow() {
+        let err = to_sql_i64(u64::MAX, "example").expect_err("overflow should fail");
+        assert!(
+            err.to_string().contains("overflows SQLite INTEGER"),
+            "error message should mention overflow"
+        );
+    }
+
+    #[test]
+    fn block_stats_update_cumulative_sets_initial_values() {
+        let stats = BlockStats {
+            block_index: 5,
+            total_reward: 10u64,
+            reward_count: 2,
+            max_zero_count: 3,
+            nicest_txid: Some("nice".to_string()),
+            utxo_spent_count: 4,
+            new_utxo_count: 6,
+        };
+
+        let cumul = stats.update_cumulative(None);
+
+        assert_eq!(cumul.block_index(), 5);
+        assert_eq!(cumul.block_count(), 1);
+        assert_eq!(*cumul.total_reward(), 10u64);
+        assert_eq!(cumul.reward_count(), 2);
+        assert_eq!(cumul.max_zero_count(), 3);
+        assert_eq!(cumul.nicest_txid(), Some("nice"));
+        assert_eq!(cumul.utxo_spent_count(), 4);
+        assert_eq!(cumul.new_utxo_count(), 6);
+    }
+
+    #[test]
+    fn block_stats_update_cumulative_accumulates_and_preserves_nicest() {
+        let previous = CumulativeStats {
+            block_index: 9,
+            block_count: 3,
+            total_reward: 50u64,
+            reward_count: 6,
+            max_zero_count: 5,
+            nicest_txid: Some("prev".to_string()),
+            utxo_spent_count: 10,
+            new_utxo_count: 12,
+        };
+
+        let stats = BlockStats {
+            block_index: 10,
+            total_reward: 5u64,
+            reward_count: 1,
+            max_zero_count: 3,
+            nicest_txid: Some("new".to_string()),
+            utxo_spent_count: 2,
+            new_utxo_count: 3,
+        };
+
+        let cumul = stats.update_cumulative(Some(previous));
+
+        assert_eq!(cumul.block_index(), 10);
+        assert_eq!(cumul.block_count(), 4);
+        assert_eq!(*cumul.total_reward(), 55u64);
+        assert_eq!(cumul.reward_count(), 7);
+        assert_eq!(cumul.max_zero_count(), 5, "should keep previous max");
+        assert_eq!(
+            cumul.nicest_txid(),
+            Some("prev"),
+            "should keep previous nicest"
+        );
+        assert_eq!(cumul.utxo_spent_count(), 12);
+        assert_eq!(cumul.new_utxo_count(), 15);
+    }
+
+    #[test]
+    fn latest_cumulative_before_returns_none_when_empty() {
+        let mut conn = Connection::open_in_memory().expect("open db");
+        let tx = conn.transaction().expect("start tx");
+        queries::create_stats_table(&tx).expect("create stats table");
+        tx.commit().expect("commit schema");
+
+        let tx = conn.transaction().expect("start read tx");
+        let latest = SqliteStore::latest_cumulative_before(&tx, 10).expect("latest query");
+        tx.commit().expect("commit read tx");
+
+        assert!(latest.is_none());
+    }
+
+    #[test]
+    fn latest_cumulative_before_returns_latest_matching_row() {
+        let mut conn = Connection::open_in_memory().expect("open db");
+        let tx = conn.transaction().expect("start tx");
+        queries::create_stats_table(&tx).expect("create stats table");
+        tx.commit().expect("commit schema");
+
+        let older = CumulativeStats {
+            block_index: 1,
+            block_count: 1,
+            total_reward: 5u64,
+            reward_count: 2,
+            max_zero_count: 1,
+            nicest_txid: Some("old".to_string()),
+            utxo_spent_count: 0,
+            new_utxo_count: 3,
+        };
+        let newer = CumulativeStats {
+            block_index: 3,
+            block_count: 2,
+            total_reward: 8u64,
+            reward_count: 4,
+            max_zero_count: 2,
+            nicest_txid: Some("new".to_string()),
+            utxo_spent_count: 1,
+            new_utxo_count: 5,
+        };
+
+        let insert_tx = conn.transaction().expect("start insert tx");
+        insert_tx
+            .execute(
+                "INSERT INTO stats (block_index, block_stats, cumul_stats) VALUES (?1, 'old', ?2)",
+                params![
+                    older.block_index as i64,
+                    serde_json::to_string(&older).unwrap()
+                ],
+            )
+            .expect("insert older row");
+        insert_tx
+            .execute(
+                "INSERT INTO stats (block_index, block_stats, cumul_stats) VALUES (?1, 'new', ?2)",
+                params![
+                    newer.block_index as i64,
+                    serde_json::to_string(&newer).unwrap()
+                ],
+            )
+            .expect("insert newer row");
+        insert_tx.commit().expect("commit inserts");
+
+        let tx = conn.transaction().expect("start read tx");
+        let latest = SqliteStore::latest_cumulative_before(&tx, 4).expect("latest query");
+        tx.commit().expect("commit read");
+
+        let latest = latest.expect("should find a row before height 4");
+        assert_eq!(latest.block_index(), 3);
+        assert_eq!(latest.block_count(), 2);
+        assert_eq!(*latest.total_reward(), 8u64);
+        assert_eq!(latest.nicest_txid(), Some("new"));
+    }
+
+    #[test]
+    fn cumulative_stats_builder_creates_correct_instance() {
+        let stats = CumulativeStats::builder()
+            .block_index(10)
+            .block_count(5)
+            .total_reward(100u64)
+            .reward_count(3)
+            .max_zero_count(2)
+            .nicest_txid(Some("txid".to_string()))
+            .utxo_spent_count(1)
+            .new_utxo_count(4)
+            .build();
+        assert_eq!(stats.block_index(), 10);
+        assert_eq!(stats.block_count(), 5);
+        assert_eq!(*stats.total_reward(), 100);
+        assert_eq!(stats.reward_count(), 3);
+        assert_eq!(stats.max_zero_count(), 2);
+        assert_eq!(stats.nicest_txid(), Some("txid"));
+        assert_eq!(stats.utxo_spent_count(), 1);
+        assert_eq!(stats.new_utxo_count(), 4);
+    }
+
+    #[test]
+    fn cumulative_stats_default_is_zeroed() {
+        let stats = CumulativeStats::default();
+        assert_eq!(stats.block_index(), 0);
+        assert_eq!(stats.block_count(), 0);
+        assert_eq!(*stats.total_reward(), 0);
+        assert_eq!(stats.reward_count(), 0);
+        assert_eq!(stats.max_zero_count(), 0);
+        assert_eq!(stats.nicest_txid(), None);
+        assert_eq!(stats.utxo_spent_count(), 0);
+        assert_eq!(stats.new_utxo_count(), 0);
+    }
+
+    #[test]
+    fn block_stats_from_processed_captures_values() {
+        use bitcoin::{hashes::Hash, Txid};
+        use mhinprotocol::types::{ProcessedMhinBlock, Reward};
+
+        let txid = Txid::from_slice(&[1u8; 32]).expect("txid");
+        let rewards = vec![Reward {
+            txid,
+            vout: 0,
+            zero_count: 5,
+            reward: 10,
+        }];
+        let block = ProcessedMhinBlock {
+            rewards,
+            total_reward: 10,
+            max_zero_count: 5,
+            nicest_txid: Some(txid),
+            utxo_spent_count: 2,
+            new_utxo_count: 3,
+        };
+
+        let stats = BlockStats::from_processed(100, &block);
+
+        assert_eq!(stats.block_index, 100);
+        assert_eq!(stats.total_reward, 10);
+        assert_eq!(stats.reward_count, 1);
+        assert_eq!(stats.max_zero_count, 5);
+        assert!(stats.nicest_txid.is_some());
+        assert_eq!(stats.utxo_spent_count, 2);
+        assert_eq!(stats.new_utxo_count, 3);
+    }
+
+    #[test]
+    fn block_stats_update_cumulative_updates_nicest_on_higher_zero_count() {
+        let previous = CumulativeStats {
+            block_index: 9,
+            block_count: 3,
+            total_reward: 50,
+            reward_count: 6,
+            max_zero_count: 3,
+            nicest_txid: Some("prev".to_string()),
+            utxo_spent_count: 10,
+            new_utxo_count: 12,
+        };
+
+        let stats = BlockStats {
+            block_index: 10,
+            total_reward: 5,
+            reward_count: 1,
+            max_zero_count: 5, // Higher than previous (3)
+            nicest_txid: Some("new_nice".to_string()),
+            utxo_spent_count: 2,
+            new_utxo_count: 3,
+        };
+
+        let cumul = stats.update_cumulative(Some(previous));
+
+        assert_eq!(cumul.max_zero_count(), 5, "should update to new higher max");
+        assert_eq!(
+            cumul.nicest_txid(),
+            Some("new_nice"),
+            "should update nicest txid"
+        );
+    }
+
+    #[test]
+    fn get_read_write_connection_creates_db_file() {
+        use super::{get_read_write_connection, DB_FILE_NAME};
+        use tempfile::TempDir;
+
+        let temp = TempDir::new().expect("temp dir");
+        let _conn = get_read_write_connection(temp.path()).expect("connection");
+
+        let db_path = temp.path().join(DB_FILE_NAME);
+        assert!(db_path.exists(), "database file should be created");
+    }
+
+    #[test]
+    fn sqlite_store_initialize_creates_tables() {
+        use super::get_read_write_connection;
+        use std::sync::{Arc, Mutex};
+        use tempfile::TempDir;
+
+        let temp = TempDir::new().expect("temp dir");
+        let conn = get_read_write_connection(temp.path()).expect("connection");
+        let conn = Arc::new(Mutex::new(conn));
+
+        SqliteStore::initialize(&conn).expect("initialize");
+
+        // Verify tables exist by querying sqlite_master
+        let guard = conn.lock().expect("lock");
+        let rewards_exists: bool = guard
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='rewards'",
+                [],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+        let stats_exists: bool = guard
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='stats'",
+                [],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+
+        assert!(rewards_exists, "rewards table should exist");
+        assert!(stats_exists, "stats table should exist");
+    }
+
+    #[test]
+    fn sqlite_store_save_and_rollback() {
+        use super::get_read_write_connection;
+        use bitcoin::{hashes::Hash, Txid};
+        use mhinprotocol::types::{ProcessedMhinBlock, Reward};
+        use std::sync::{Arc, Mutex};
+        use tempfile::TempDir;
+
+        let temp = TempDir::new().expect("temp dir");
+        let conn = get_read_write_connection(temp.path()).expect("connection");
+        let conn = Arc::new(Mutex::new(conn));
+        SqliteStore::initialize(&conn).expect("initialize");
+
+        let store = SqliteStore::new(Arc::clone(&conn));
+
+        // Save block 0
+        let txid = Txid::from_slice(&[1u8; 32]).expect("txid");
+        let block0 = ProcessedMhinBlock {
+            rewards: vec![Reward {
+                txid,
+                vout: 0,
+                zero_count: 3,
+                reward: 100,
+            }],
+            total_reward: 100,
+            max_zero_count: 3,
+            nicest_txid: Some(txid),
+            utxo_spent_count: 1,
+            new_utxo_count: 2,
+        };
+        let cumul0 = store.save_block(0, &block0).expect("save block 0");
+        assert_eq!(cumul0.block_index(), 0);
+        assert_eq!(cumul0.block_count(), 1);
+
+        // Save block 1
+        let txid2 = Txid::from_slice(&[2u8; 32]).expect("txid2");
+        let block1 = ProcessedMhinBlock {
+            rewards: vec![Reward {
+                txid: txid2,
+                vout: 1,
+                zero_count: 4,
+                reward: 50,
+            }],
+            total_reward: 50,
+            max_zero_count: 4,
+            nicest_txid: Some(txid2),
+            utxo_spent_count: 0,
+            new_utxo_count: 1,
+        };
+        let cumul1 = store.save_block(1, &block1).expect("save block 1");
+        assert_eq!(cumul1.block_index(), 1);
+        assert_eq!(cumul1.block_count(), 2);
+        assert_eq!(*cumul1.total_reward(), 150);
+
+        // Rollback to before block 1
+        let after_rollback = store.rollback(0).expect("rollback");
+        let after_rollback = after_rollback.expect("should have stats after rollback");
+        assert_eq!(after_rollback.block_index(), 0);
+        assert_eq!(after_rollback.block_count(), 1);
+        assert_eq!(*after_rollback.total_reward(), 100);
+    }
 }
