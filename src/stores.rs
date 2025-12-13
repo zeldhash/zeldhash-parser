@@ -1,4 +1,4 @@
-//! Persistent storage backends for MHIN data.
+//! Persistent storage backends for ZELD data.
 //!
 //! This module provides two storage systems:
 //!

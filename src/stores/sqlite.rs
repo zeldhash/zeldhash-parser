@@ -1,7 +1,7 @@
-//! SQLite storage for MHIN block statistics and rewards.
+//! SQLite storage for ZELD block statistics and rewards.
 //!
 //! Persists per-block statistics and cumulative protocol metrics in a local
-//! SQLite database. The data is used for querying historical MHIN protocol
+//! SQLite database. The data is used for querying historical ZELD protocol
 //! state and displaying progress information.
 
 use std::fs;
@@ -9,22 +9,22 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use anyhow::{anyhow, Context, Result};
-use mhinprotocol::types::{Amount, ProcessedMhinBlock};
 use rusqlite::{Connection, Transaction};
 use serde::{Deserialize, Serialize};
+use zeldhash_protocol::types::{Amount, ProcessedZeldBlock};
 
 use super::queries;
 
 static LATEST_CUMULATIVE: OnceLock<Mutex<Option<CumulativeStats>>> = OnceLock::new();
 
 /// Default filename for the SQLite statistics database.
-pub const DB_FILE_NAME: &str = "mhinstats.sqlite3";
+pub const DB_FILE_NAME: &str = "zeldstats.sqlite3";
 
 /// Opens (and creates when missing) the SQLite database used to persist block data.
 pub fn get_read_write_connection(data_dir: &Path) -> Result<Connection> {
     fs::create_dir_all(data_dir).with_context(|| {
         format!(
-            "unable to create MHIN data directory at {}",
+            "unable to create ZELD data directory at {}",
             data_dir.display()
         )
     })?;
@@ -75,7 +75,7 @@ impl SqliteStore {
         let mut guard = conn
             .lock()
             .expect("sqlite connection mutex poisoned during initialization");
-        Self::ensure_schema(&mut guard).context("failed to initialize MHIN SQLite schema")?;
+        Self::ensure_schema(&mut guard).context("failed to initialize ZELD SQLite schema")?;
         Self::refresh_cumulative_cache(&mut guard)
             .context("failed to warm cumulative stats cache")?;
         Ok(())
@@ -91,7 +91,7 @@ impl SqliteStore {
     pub fn save_block(
         &self,
         block_index: u64,
-        block: &ProcessedMhinBlock,
+        block: &ProcessedZeldBlock,
     ) -> Result<CumulativeStats> {
         let block_index_sql = to_sql_i64(block_index, "block_index")?;
         let mut conn = self
@@ -209,7 +209,7 @@ struct BlockStats {
 }
 
 impl BlockStats {
-    fn from_processed(block_index: u64, block: &ProcessedMhinBlock) -> Self {
+    fn from_processed(block_index: u64, block: &ProcessedZeldBlock) -> Self {
         Self {
             block_index,
             total_reward: block.total_reward,
@@ -241,7 +241,7 @@ impl BlockStats {
 
 /// Cumulative statistics aggregated across all processed blocks.
 ///
-/// Tracks running totals for MHIN protocol metrics including total rewards,
+/// Tracks running totals for ZELD protocol metrics including total rewards,
 /// maximum zero count observed, and UTXO activity.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct CumulativeStats {
@@ -266,7 +266,7 @@ impl CumulativeStats {
         self.block_count
     }
 
-    /// Returns the cumulative MHIN reward in satoshis.
+    /// Returns the cumulative ZELD reward in satoshis.
     pub fn total_reward(&self) -> &Amount {
         &self.total_reward
     }
@@ -556,7 +556,7 @@ mod tests {
     #[test]
     fn block_stats_from_processed_captures_values() {
         use bitcoin::{hashes::Hash, Txid};
-        use mhinprotocol::types::{ProcessedMhinBlock, Reward};
+        use zeldhash_protocol::types::{ProcessedZeldBlock, Reward};
 
         let txid = Txid::from_slice(&[1u8; 32]).expect("txid");
         let rewards = vec![Reward {
@@ -565,7 +565,7 @@ mod tests {
             zero_count: 5,
             reward: 10,
         }];
-        let block = ProcessedMhinBlock {
+        let block = ProcessedZeldBlock {
             rewards,
             total_reward: 10,
             max_zero_count: 5,
@@ -667,9 +667,9 @@ mod tests {
     fn sqlite_store_save_and_rollback() {
         use super::get_read_write_connection;
         use bitcoin::{hashes::Hash, Txid};
-        use mhinprotocol::types::{ProcessedMhinBlock, Reward};
         use std::sync::{Arc, Mutex};
         use tempfile::TempDir;
+        use zeldhash_protocol::types::{ProcessedZeldBlock, Reward};
 
         let temp = TempDir::new().expect("temp dir");
         let conn = get_read_write_connection(temp.path()).expect("connection");
@@ -680,7 +680,7 @@ mod tests {
 
         // Save block 0
         let txid = Txid::from_slice(&[1u8; 32]).expect("txid");
-        let block0 = ProcessedMhinBlock {
+        let block0 = ProcessedZeldBlock {
             rewards: vec![Reward {
                 txid,
                 vout: 0,
@@ -699,7 +699,7 @@ mod tests {
 
         // Save block 1
         let txid2 = Txid::from_slice(&[2u8; 32]).expect("txid2");
-        let block1 = ProcessedMhinBlock {
+        let block1 = ProcessedZeldBlock {
             rewards: vec![Reward {
                 txid: txid2,
                 vout: 1,

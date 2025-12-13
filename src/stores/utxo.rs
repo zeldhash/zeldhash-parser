@@ -1,24 +1,24 @@
 //! UTXO storage backed by rollblock for O(1) lookups and instant rollbacks.
 //!
-//! Wraps the [`rollblock`] key-value store to provide MHIN-aware UTXO management
+//! Wraps the [`rollblock`] key-value store to provide ZELD-aware UTXO management
 //! with support for efficient chain reorganization handling.
 
 use std::ops::{Deref, DerefMut};
 
-use mhinprotocol::{
-    store::MhinStore,
+use rollblock::types::{Operation as StoreOperation, StoreKey, Value as StoreValue};
+use rollblock::BlockStoreFacade;
+use zeldhash_protocol::{
+    store::ZeldStore,
     types::{Amount, UtxoKey},
 };
-use rollblock::types::{Operation as StoreOperation, Value as StoreValue};
-use rollblock::MhinStoreBlockFacade;
 
 /// Owns the rollblock facade and hands out lightweight store views as needed.
 pub(crate) struct UTXOStore {
-    facade: MhinStoreBlockFacade,
+    facade: BlockStoreFacade,
 }
 
 impl UTXOStore {
-    pub(crate) fn new(facade: MhinStoreBlockFacade) -> Self {
+    pub(crate) fn new(facade: BlockStoreFacade) -> Self {
         Self { facade }
     }
 
@@ -30,7 +30,7 @@ impl UTXOStore {
 }
 
 impl Deref for UTXOStore {
-    type Target = MhinStoreBlockFacade;
+    type Target = BlockStoreFacade;
 
     fn deref(&self) -> &Self::Target {
         &self.facade
@@ -43,12 +43,17 @@ impl DerefMut for UTXOStore {
     }
 }
 
-/// Thin wrapper to expose `MhinStore` functionality on top of `MhinStoreBlockFacade`.
+/// Thin wrapper to expose `ZeldStore` functionality on top of `BlockStoreFacade`.
 pub(crate) struct UTXOStoreView<'a> {
-    facade: &'a MhinStoreBlockFacade,
+    facade: &'a BlockStoreFacade,
 }
 
 impl<'a> UTXOStoreView<'a> {
+    #[inline]
+    fn to_store_key(key: &UtxoKey) -> StoreKey {
+        StoreKey::from_prefix(*key)
+    }
+
     fn decode_value(&self, key: &UtxoKey, value: StoreValue) -> Amount {
         if value.is_delete() {
             return 0;
@@ -63,9 +68,10 @@ impl<'a> UTXOStoreView<'a> {
     }
 }
 
-impl<'a> MhinStore for UTXOStoreView<'a> {
+impl<'a> ZeldStore for UTXOStoreView<'a> {
     fn get(&mut self, key: &UtxoKey) -> Amount {
-        let value = self.facade.get(*key).unwrap_or_else(|err| {
+        let store_key = Self::to_store_key(key);
+        let value = self.facade.get(store_key).unwrap_or_else(|err| {
             // Panic intentionally: rollblock read failures signal critical data corruption that must be investigated by an operator.
             panic!("rollblock get failed for key {key:?}: {err}");
         });
@@ -73,7 +79,8 @@ impl<'a> MhinStore for UTXOStoreView<'a> {
     }
 
     fn pop(&mut self, key: &UtxoKey) -> Amount {
-        let value = self.facade.pop(*key).unwrap_or_else(|err| {
+        let store_key = Self::to_store_key(key);
+        let value = self.facade.pop(store_key).unwrap_or_else(|err| {
             // Panic intentionally: rollblock read failures signal critical data corruption that must be investigated by an operator.
             panic!("rollblock pop failed for key {key:?}: {err}");
         });
@@ -81,8 +88,9 @@ impl<'a> MhinStore for UTXOStoreView<'a> {
     }
 
     fn set(&mut self, key: UtxoKey, value: Amount) {
+        let store_key = Self::to_store_key(&key);
         if let Err(err) = self.facade.set(StoreOperation {
-            key,
+            key: store_key,
             value: StoreValue::from(value),
         }) {
             // Panic intentionally: write failures mean the backing store is inconsistent and requires manual operator intervention.
@@ -99,7 +107,7 @@ mod tests {
 
     fn create_test_store(temp_dir: &TempDir) -> UTXOStore {
         let config = StoreConfig::new(temp_dir.path(), 2, 1000, 2, false).expect("store config");
-        let facade = MhinStoreBlockFacade::new(config).expect("create facade");
+        let facade = BlockStoreFacade::new(config).expect("create facade");
         UTXOStore::new(facade)
     }
 
@@ -108,7 +116,7 @@ mod tests {
         let temp = TempDir::new().expect("temp dir");
         let store = create_test_store(&temp);
         // Deref should return a reference to the facade - checking current_block confirms it works
-        let facade_ref: &MhinStoreBlockFacade = &store;
+        let facade_ref: &BlockStoreFacade = &store;
         assert!(facade_ref.current_block().is_ok());
     }
 
@@ -119,7 +127,7 @@ mod tests {
         let view = store.view();
         // An empty StoreValue represents a deleted/missing key
         let empty_value = StoreValue::from_vec(Vec::new());
-        let key: UtxoKey = [0u8; 8];
+        let key: UtxoKey = [0u8; 12];
         let amount = view.decode_value(&key, empty_value);
         assert_eq!(amount, 0);
     }
@@ -129,7 +137,7 @@ mod tests {
         let temp = TempDir::new().expect("temp dir");
         let store = create_test_store(&temp);
         let view = store.view();
-        let key: UtxoKey = [1u8; 8];
+        let key: UtxoKey = [1u8; 12];
         let value = StoreValue::from(42u64);
         let amount = view.decode_value(&key, value);
         assert_eq!(amount, 42);
@@ -142,7 +150,7 @@ mod tests {
 
         store.start_block(0).expect("start block");
 
-        let key: UtxoKey = [2u8; 8];
+        let key: UtxoKey = [2u8; 12];
         {
             let mut view = store.view();
             view.set(key, 100);
@@ -166,7 +174,7 @@ mod tests {
         let store = create_test_store(&temp);
 
         store.start_block(0).expect("start block");
-        let key: UtxoKey = [3u8; 8];
+        let key: UtxoKey = [3u8; 12];
         {
             let mut view = store.view();
             view.set(key, 200);
@@ -196,7 +204,7 @@ mod tests {
         let temp = TempDir::new().expect("temp dir");
         let mut store = create_test_store(&temp);
         // DerefMut should allow us to call mutable methods on the facade
-        let facade_mut: &mut MhinStoreBlockFacade = &mut store;
+        let facade_mut: &mut BlockStoreFacade = &mut store;
         facade_mut
             .start_block(0)
             .expect("start block via deref_mut");

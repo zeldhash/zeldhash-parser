@@ -10,13 +10,13 @@ use serde::Deserialize;
 
 use super::parse_duration;
 
-pub const DEFAULT_ROLLBLOCK_REMOTE_USER: &str = "mhin";
-pub const DEFAULT_ROLLBLOCK_REMOTE_PASSWORD: &str = "mhin";
+pub const DEFAULT_ROLLBLOCK_REMOTE_USER: &str = "zeld";
+pub const DEFAULT_ROLLBLOCK_REMOTE_PASSWORD: &str = "zeld";
 pub const DEFAULT_ROLLBLOCK_REMOTE_PORT: u16 = 9443;
 pub const HELP_ROLLBLOCK_REMOTE_USER: &str =
-    "Optional. Basic auth username for the embedded rollblock server. [default: mhin]";
+    "Optional. Basic auth username for the embedded rollblock server. [default: zeld]";
 pub const HELP_ROLLBLOCK_REMOTE_PASSWORD: &str = "Optional. Basic auth password for the embedded \
-                                                 rollblock server. [default: mhin]";
+                                                 rollblock server. [default: zeld]";
 pub const HELP_ROLLBLOCK_REMOTE_PORT: &str =
     "Optional. TCP port for the embedded rollblock server. [default: 9443]";
 

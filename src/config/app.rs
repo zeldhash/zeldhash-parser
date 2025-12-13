@@ -10,17 +10,17 @@ use anyhow::{anyhow, Context, Result};
 use directories::ProjectDirs;
 use serde::Deserialize;
 
-use crate::cli::{Cli, MhinNetworkArg, ProtoblockOptions, RollblockOptions};
+use crate::cli::{Cli, ProtoblockOptions, RollblockOptions, ZeldNetworkArg};
 
 use super::overlay::Overlay;
 use super::protoblock::ProtoblockSettings;
 use super::rollblock::RollblockSettings;
 
-const CONFIG_FILE_NAME: &str = "mhinparser.toml";
-const LEGACY_CONFIG_FILES: [&str; 2] = ["mhinparser.toml", "config/mhinparser.toml"];
+const CONFIG_FILE_NAME: &str = "zeldhash-parser.toml";
+const LEGACY_CONFIG_FILES: [&str; 2] = ["zeldhash-parser.toml", "config/zeldhash-parser.toml"];
 const PROJECT_QUALIFIER: &str = "org";
-const PROJECT_ORGANIZATION: &str = "myhashisnice";
-const PROJECT_APPLICATION: &str = "mhinparser";
+const PROJECT_ORGANIZATION: &str = "zeldhash";
+const PROJECT_APPLICATION: &str = "zeldhash-parser";
 
 /// Fully materialized configuration for the application.
 ///
@@ -33,7 +33,7 @@ pub struct AppConfig {
     /// Root directory for application data (SQLite, rollblock, logs, etc.).
     pub data_dir: PathBuf,
     /// Target Bitcoin network.
-    pub network: mhinprotocol::MhinNetwork,
+    pub network: zeldhash_protocol::ZeldNetwork,
     /// Block fetching configuration.
     pub protoblock: ProtoblockSettings,
     /// UTXO store configuration.
@@ -73,7 +73,7 @@ impl AppConfig {
             .or_else(default_data_dir_path)
             .ok_or_else(|| {
                 anyhow!(
-                    "data_dir is required (set --data-dir, MHINPARSER_DATA_DIR, or ensure the OS user data directory is available)"
+                    "data_dir is required (set --data-dir, ZELDHASH_PARSER_DATA_DIR, or ensure the OS user data directory is available)"
                 )
             })?;
 
@@ -94,7 +94,7 @@ impl AppConfig {
         let network = cli_network
             .or(file_network)
             .map(Into::into)
-            .unwrap_or(mhinprotocol::MhinNetwork::Mainnet);
+            .unwrap_or(zeldhash_protocol::ZeldNetwork::Mainnet);
 
         Ok(Self {
             config_file: config_path,
@@ -125,7 +125,7 @@ pub fn load_runtime_paths(cli: Cli) -> Result<RuntimePaths> {
         .or_else(default_data_dir_path)
         .ok_or_else(|| {
             anyhow!(
-                "data_dir is required (set --data-dir, MHINPARSER_DATA_DIR, or ensure the OS user data directory is available)"
+                "data_dir is required (set --data-dir, ZELDHASH_PARSER_DATA_DIR, or ensure the OS user data directory is available)"
             )
         })?;
 
@@ -137,7 +137,7 @@ struct FileConfig {
     #[serde(default)]
     data_dir: Option<PathBuf>,
     #[serde(default)]
-    network: Option<MhinNetworkArg>,
+    network: Option<ZeldNetworkArg>,
     #[serde(default)]
     protoblock: Option<ProtoblockOptions>,
     #[serde(default)]
@@ -173,13 +173,13 @@ fn read_toml(path: &Path) -> Result<FileConfig> {
         .with_context(|| format!("failed to parse config file {}", path.display()))
 }
 
-impl From<MhinNetworkArg> for mhinprotocol::MhinNetwork {
-    fn from(value: MhinNetworkArg) -> Self {
+impl From<ZeldNetworkArg> for zeldhash_protocol::ZeldNetwork {
+    fn from(value: ZeldNetworkArg) -> Self {
         match value {
-            MhinNetworkArg::Mainnet => mhinprotocol::MhinNetwork::Mainnet,
-            MhinNetworkArg::Testnet4 => mhinprotocol::MhinNetwork::Testnet4,
-            MhinNetworkArg::Signet => mhinprotocol::MhinNetwork::Signet,
-            MhinNetworkArg::Regtest => mhinprotocol::MhinNetwork::Regtest,
+            ZeldNetworkArg::Mainnet => zeldhash_protocol::ZeldNetwork::Mainnet,
+            ZeldNetworkArg::Testnet4 => zeldhash_protocol::ZeldNetwork::Testnet4,
+            ZeldNetworkArg::Signet => zeldhash_protocol::ZeldNetwork::Signet,
+            ZeldNetworkArg::Regtest => zeldhash_protocol::ZeldNetwork::Regtest,
         }
     }
 }
@@ -216,8 +216,8 @@ impl RuntimePaths {
             .with_context(|| format!("failed to create logs dir {}", logs_dir.display()))?;
 
         Ok(Self {
-            pid_file: run_dir.join("mhinparser.pid"),
-            log_file: logs_dir.join("mhinparser.log"),
+            pid_file: run_dir.join("zeldhash-parser.pid"),
+            log_file: logs_dir.join("zeldhash-parser.log"),
         })
     }
 
@@ -235,7 +235,7 @@ impl RuntimePaths {
 #[cfg(test)]
 mod tests {
     use super::{load_file_config, AppConfig, RuntimePaths};
-    use crate::cli::{Cli, MhinNetworkArg, ProtoblockOptions, RollblockOptions};
+    use crate::cli::{Cli, ProtoblockOptions, RollblockOptions, ZeldNetworkArg};
     use std::fs;
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -256,15 +256,16 @@ mod tests {
     #[test]
     fn load_file_config_reads_provided_path() {
         let temp = TempDir::new().expect("temp dir");
-        let config_path = temp.path().join("mhinparser.toml");
-        fs::write(&config_path, r#"data_dir = "/tmp/mhin-tests""#).expect("write config");
+        let config_path = temp.path().join("zeldhash-parser.toml");
+        fs::write(&config_path, r#"data_dir = "/tmp/zeldhash-parser-tests""#)
+            .expect("write config");
 
         let (config, path) = load_file_config(Some(&config_path)).expect("load config");
 
         assert_eq!(path.as_deref(), Some(config_path.as_path()));
         assert_eq!(
             config.data_dir.as_deref(),
-            Some(PathBuf::from("/tmp/mhin-tests").as_path())
+            Some(PathBuf::from("/tmp/zeldhash-parser-tests").as_path())
         );
     }
 
@@ -291,7 +292,7 @@ mod tests {
         fs::create_dir_all(&file_data_dir).expect("file data dir");
         fs::create_dir_all(&cli_data_dir).expect("cli data dir");
 
-        let config_path = temp.path().join("mhinparser.toml");
+        let config_path = temp.path().join("zeldhash-parser.toml");
         fs::write(
             &config_path,
             format!(r#"data_dir = "{}""#, file_data_dir.display()),
@@ -300,7 +301,7 @@ mod tests {
 
         let cli = Cli {
             config: Some(config_path.clone()),
-            network: Some(MhinNetworkArg::Signet),
+            network: Some(ZeldNetworkArg::Signet),
             data_dir: Some(cli_data_dir.clone()),
             protoblock: ProtoblockOptions::default(),
             rollblock: RollblockOptions::default(),
@@ -313,7 +314,10 @@ mod tests {
 
         assert_eq!(app.config_file.as_deref(), Some(config_path.as_path()));
         assert_eq!(app.data_dir, cli_data_dir);
-        assert!(matches!(app.network, mhinprotocol::MhinNetwork::Signet));
+        assert!(matches!(
+            app.network,
+            zeldhash_protocol::ZeldNetwork::Signet
+        ));
     }
 
     #[test]
@@ -322,7 +326,7 @@ mod tests {
         let file_data_dir = temp.path().join("file_only");
         fs::create_dir_all(&file_data_dir).expect("file data dir");
 
-        let config_path = temp.path().join("mhinparser.toml");
+        let config_path = temp.path().join("zeldhash-parser.toml");
         fs::write(
             &config_path,
             format!(
@@ -349,31 +353,34 @@ network = "Regtest"
         let app = AppConfig::load(cli).expect("load app config from file");
 
         assert_eq!(app.data_dir, file_data_dir);
-        assert!(matches!(app.network, mhinprotocol::MhinNetwork::Regtest));
+        assert!(matches!(
+            app.network,
+            zeldhash_protocol::ZeldNetwork::Regtest
+        ));
     }
 
     #[test]
-    fn mhin_network_from_mainnet() {
-        let network: mhinprotocol::MhinNetwork = MhinNetworkArg::Mainnet.into();
-        assert!(matches!(network, mhinprotocol::MhinNetwork::Mainnet));
+    fn zeldhash_network_from_mainnet() {
+        let network: zeldhash_protocol::ZeldNetwork = ZeldNetworkArg::Mainnet.into();
+        assert!(matches!(network, zeldhash_protocol::ZeldNetwork::Mainnet));
     }
 
     #[test]
-    fn mhin_network_from_testnet4() {
-        let network: mhinprotocol::MhinNetwork = MhinNetworkArg::Testnet4.into();
-        assert!(matches!(network, mhinprotocol::MhinNetwork::Testnet4));
+    fn zeldhash_network_from_testnet4() {
+        let network: zeldhash_protocol::ZeldNetwork = ZeldNetworkArg::Testnet4.into();
+        assert!(matches!(network, zeldhash_protocol::ZeldNetwork::Testnet4));
     }
 
     #[test]
-    fn mhin_network_from_signet() {
-        let network: mhinprotocol::MhinNetwork = MhinNetworkArg::Signet.into();
-        assert!(matches!(network, mhinprotocol::MhinNetwork::Signet));
+    fn zeldhash_network_from_signet() {
+        let network: zeldhash_protocol::ZeldNetwork = ZeldNetworkArg::Signet.into();
+        assert!(matches!(network, zeldhash_protocol::ZeldNetwork::Signet));
     }
 
     #[test]
-    fn mhin_network_from_regtest() {
-        let network: mhinprotocol::MhinNetwork = MhinNetworkArg::Regtest.into();
-        assert!(matches!(network, mhinprotocol::MhinNetwork::Regtest));
+    fn zeldhash_network_from_regtest() {
+        let network: zeldhash_protocol::ZeldNetwork = ZeldNetworkArg::Regtest.into();
+        assert!(matches!(network, zeldhash_protocol::ZeldNetwork::Regtest));
     }
 
     #[test]
@@ -394,8 +401,8 @@ network = "Regtest"
         let pid_file = runtime.pid_file();
         let log_file = runtime.log_file();
 
-        assert!(pid_file.ends_with("mhinparser.pid"));
-        assert!(log_file.ends_with("mhinparser.log"));
+        assert!(pid_file.ends_with("zeldhash-parser.pid"));
+        assert!(log_file.ends_with("zeldhash-parser.log"));
         assert!(pid_file.starts_with(temp.path()));
         assert!(log_file.starts_with(temp.path()));
     }

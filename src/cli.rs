@@ -1,6 +1,6 @@
 //! Command-line interface definitions and argument parsing.
 //!
-//! This module provides the CLI structure for mhinparser using [`clap`],
+//! This module provides the CLI structure for zeldhash-parser using [`clap`],
 //! including options for protoblock and rollblock configuration.
 
 mod args;
@@ -8,7 +8,7 @@ mod duration;
 mod protoblock;
 mod rollblock;
 
-pub use args::{Cli, Command, MhinNetworkArg};
+pub use args::{Cli, Command, ZeldNetworkArg};
 pub use duration::parse_duration;
 pub use protoblock::{
     ProtoblockOptions, DEFAULT_PROTOBLOCK_MAX_BATCH_SIZE_MB, DEFAULT_PROTOBLOCK_REORG_WINDOW_SIZE,

@@ -1,8 +1,8 @@
-//! # mhinparser
+//! # zeldhash-parser
 //!
-//! A high-performance Bitcoin blockchain parser implementing the **My Hash Is Nice** protocol.
+//! A high-performance Bitcoin blockchain parser implementing the **ZeldHash** protocol.
 //!
-//! This binary application parses the Bitcoin blockchain to track MHIN rewards,
+//! This binary application parses the Bitcoin blockchain to track ZELD rewards,
 //! leveraging [`protoblock`](https://crates.io/crates/protoblock) for fast block
 //! fetching and [`rollblock`](https://crates.io/crates/rollblock) for efficient
 //! UTXO management with instant rollback support.
@@ -19,16 +19,16 @@
 //!
 //! ```bash
 //! # Parse mainnet
-//! mhinparser
+//! zeldhash-parser
 //!
 //! # Parse testnet4
-//! mhinparser --network testnet4
+//! zeldhash-parser --network testnet4
 //!
 //! # Run as daemon
-//! mhinparser --daemon
+//! zeldhash-parser --daemon
 //! ```
 //!
-//! See the [README](https://github.com/ouziel-slama/mhinparser) for full documentation.
+//! See the [README](https://github.com/ouziel-slama/zeldhash-parser) for full documentation.
 
 mod cli;
 mod config;
@@ -59,7 +59,7 @@ use crate::cli::{
     DEFAULT_ROLLBLOCK_REMOTE_USER,
 };
 use crate::config::{load_runtime_paths, AppConfig, RuntimePaths};
-use crate::parser::MhinParser;
+use crate::parser::ZeldParser;
 use crate::progress::ProgressReporter;
 use crate::stores::sqlite::DB_FILE_NAME;
 
@@ -114,7 +114,7 @@ fn run_with_config(app_config: AppConfig, options: RunOptions) -> Result<()> {
 
 fn start_runtime(app_config: AppConfig, interactive: bool) -> Result<()> {
     let fetcher_config = app_config.protoblock.fetcher_config().clone();
-    let parser = MhinParser::new(app_config)?;
+    let parser = ZeldParser::new(app_config)?;
     let runtime = Builder::new_multi_thread().enable_all().build()?;
 
     runtime.block_on(async move { run_parser(fetcher_config, parser, interactive).await })?;
@@ -123,7 +123,7 @@ fn start_runtime(app_config: AppConfig, interactive: bool) -> Result<()> {
 
 async fn run_parser(
     fetcher_config: FetcherConfig,
-    mut parser: MhinParser,
+    mut parser: ZeldParser,
     interactive: bool,
 ) -> Result<()> {
     let mut progress = None;
@@ -153,7 +153,7 @@ fn announce_configuration(app_config: &AppConfig, interactive: bool) {
         }
     };
 
-    emit("Starting My Hash Is Nice parser.".to_string());
+    emit("Starting ZeldHash parser.".to_string());
     if let Some(config_file) = &app_config.config_file {
         emit(format!("Config file: {}", config_file.display()));
     } else {
@@ -330,7 +330,10 @@ fn spawn_daemon(app_config: &AppConfig) -> Result<()> {
     let child = command.spawn().context("failed to spawn daemon child")?;
     write_pid_file(pid_path, child.id() as pid_t)?;
 
-    println!("Starting mhinparser in daemon mode (pid {}).", child.id());
+    println!(
+        "Starting zeldhash-parser in daemon mode (pid {}).",
+        child.id()
+    );
     println!("Logs → {}", app_config.runtime.log_file().display());
     println!("PID file → {}", pid_path.display());
 
@@ -386,7 +389,7 @@ fn stop_daemon(_runtime_paths: RuntimePaths) -> Result<()> {
 fn ensure_pid_slot(pid_path: &Path) -> Result<()> {
     if let Some(pid) = read_pid_file(pid_path)? {
         if process_alive(pid) {
-            bail!("mhinparser already running (pid {pid})");
+            bail!("zeldhash-parser already running (pid {pid})");
         }
         cleanup_pid_file(pid_path);
     }
@@ -502,7 +505,7 @@ mod tests {
         AppConfig {
             config_file: None,
             data_dir: data_dir.to_path_buf(),
-            network: mhinprotocol::MhinNetwork::Mainnet,
+            network: zeldhash_protocol::ZeldNetwork::Mainnet,
             protoblock,
             rollblock,
             runtime,

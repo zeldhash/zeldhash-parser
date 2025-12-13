@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::{anyhow, Context, Result};
 use rollblock::{
-    orchestrator::DurabilityMode, MhinStoreBlockFacade, RemoteServerSettings, StoreConfig,
+    orchestrator::DurabilityMode, BlockStoreFacade, RemoteServerSettings, StoreConfig,
 };
 
 use crate::cli::{
@@ -170,7 +170,7 @@ impl RollblockSettings {
         peek_config.enable_server = false;
         peek_config.remote_server = None;
 
-        let store = MhinStoreBlockFacade::new(peek_config)
+        let store = BlockStoreFacade::new(peek_config)
             .context("failed to open rollblock store to determine start height")?;
         let current_block = store
             .current_block()

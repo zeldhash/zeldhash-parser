@@ -1,15 +1,15 @@
 [package]
-name = "mhinparser"
-version = "0.1.1"
+name = "zeldhash-parser"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT OR Apache-2.0"
-description = "High-performance Bitcoin blockchain parser implementing the My Hash Is Nice protocol"
+description = "High-performance Bitcoin blockchain parser implementing the ZeldHash protocol"
 readme = "README.md"
-homepage = "https://github.com/ouziel-slama/mhinparser"
-documentation = "https://docs.rs/mhinparser"
-repository = "https://github.com/ouziel-slama/mhinparser"
-keywords = ["bitcoin", "blockchain", "parser", "mhin"]
+homepage = "https://github.com/ouziel-slama/zeldhash-parser"
+documentation = "https://docs.rs/zeldhash-parser"
+repository = "https://github.com/ouziel-slama/zeldhash-parser"
+keywords = ["bitcoin", "blockchain", "parser", "zeld", "zeldhash"]
 categories = ["cryptography::cryptocurrencies"]
 
 [dependencies]
@@ -21,8 +21,8 @@ humantime = "2.3.0"
 humantime-serde = "1.1.1"
 libc = "0.2.178"
 protoblock = "0.1.6"
-rollblock = "0.3.4"
-mhinprotocol = "0.2.3"
+rollblock = { version = "0.4.0", features = ["key-12"] }
+zeldhash-protocol = "0.3.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 rusqlite = { version = "0.37.0", features = ["bundled"] }

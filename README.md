@@ -1,15 +1,15 @@
-# mhinparser
+# zeldhash-parser
 
-[![Tests](https://github.com/ouziel-slama/mhinparser/actions/workflows/tests.yml/badge.svg)](https://github.com/ouziel-slama/mhinparser/actions/workflows/tests.yml)
-[![Coverage](https://codecov.io/github/ouziel-slama/mhinparser/graph/badge.svg?token=QKMVNDU06E)](https://codecov.io/github/ouziel-slama/mhinparser)
-[![Format](https://github.com/ouziel-slama/mhinparser/actions/workflows/fmt.yml/badge.svg)](https://github.com/ouziel-slama/mhinparser/actions/workflows/fmt.yml)
-[![Clippy](https://github.com/ouziel-slama/mhinparser/actions/workflows/clippy.yml/badge.svg)](https://github.com/ouziel-slama/mhinparser/actions/workflows/clippy.yml)
-[![Crates.io](https://img.shields.io/crates/v/mhinparser.svg)](https://crates.io/crates/mhinparser)
-[![Docs.rs](https://docs.rs/mhinparser/badge.svg)](https://docs.rs/mhinparser)
+[![Tests](https://github.com/ouziel-slama/zeldhash-parser/actions/workflows/tests.yml/badge.svg)](https://github.com/ouziel-slama/zeldhash-parser/actions/workflows/tests.yml)
+[![Coverage](https://codecov.io/github/ouziel-slama/zeldhash-parser/graph/badge.svg?token=QKMVNDU06E)](https://codecov.io/github/ouziel-slama/zeldhash-parser)
+[![Format](https://github.com/ouziel-slama/zeldhash-parser/actions/workflows/fmt.yml/badge.svg)](https://github.com/ouziel-slama/zeldhash-parser/actions/workflows/fmt.yml)
+[![Clippy](https://github.com/ouziel-slama/zeldhash-parser/actions/workflows/clippy.yml/badge.svg)](https://github.com/ouziel-slama/zeldhash-parser/actions/workflows/clippy.yml)
+[![Crates.io](https://img.shields.io/crates/v/zeldhash-parser.svg)](https://crates.io/crates/zeldhash-parser)
+[![Docs.rs](https://docs.rs/zeldhash-parser/badge.svg)](https://docs.rs/zeldhash-parser)
 
-A high-performance Bitcoin blockchain parser implementing the **[My Hash Is Nice](https://myhashisnice.org/)** protocol.
+A high-performance Bitcoin blockchain parser implementing the **[ZeldHash](https://zeldhash.com/)** protocol.
 
-Built on [`mhinprotocol`](https://crates.io/crates/mhinprotocol), this parser leverages [`protoblock`](https://crates.io/crates/protoblock) for blazing-fast block fetching and [`rollblock`](https://crates.io/crates/rollblock) for efficient UTXO management with instant rollback support.
+Built on [`zeldhash_protocol`](https://crates.io/crates/zeldhash_protocol), this parser leverages [`protoblock`](https://crates.io/crates/protoblock) for blazing-fast block fetching and [`rollblock`](https://crates.io/crates/rollblock) for efficient UTXO management with instant rollback support.
 
 ## Features
 
@@ -22,14 +22,14 @@ Built on [`mhinprotocol`](https://crates.io/crates/mhinprotocol), this parser le
 ## Installation
 
 ```bash
-cargo install mhinparser
+cargo install zeldhash-parser
 ```
 
 Or build from source:
 
 ```bash
-git clone https://github.com/ouziel-slama/mhinparser
-cd mhinparser
+git clone https://github.com/ouziel-slama/zeldhash-parser
+cd zeldhash-parser
 cargo build --release
 ```
 
@@ -37,23 +37,23 @@ cargo build --release
 
 ```bash
 # Parse mainnet (connects to local Bitcoin Core RPC)
-mhinparser
+zeldhash-parser
 
 # Parse testnet4
-mhinparser --network testnet4
+zeldhash-parser --network testnet4
 
 # Run as daemon
-mhinparser --daemon
+zeldhash-parser --daemon
 
 # Stop daemon
-mhinparser stop
+zeldhash-parser stop
 ```
 
 ## Configuration
 
 Configuration can be provided via CLI flags, environment variables, or a TOML file.
 
-Default config location: `~/.config/myhashisnice/mhinparser/mhinparser.toml`
+Default config location: `~/.config/zeldhash/zeldhash-parser/zeldhash-parser.toml`
 
 Example configuration with production-optimized values (defaults are more conservative):
 
@@ -72,26 +72,26 @@ thread_count = 8              # default: 4
 max_batch_size_mb = 256       # default: 10
 
 [rollblock]
-user = "mhin"                 # change this in production
-password = "mhin"             # change this in production
+user = "zeld"                 # change this in production
+password = "zeld"             # change this in production
 port = 9443
 shards_count = 16
 thread_count = 4
 initial_capacity = 100_000_000  # default: 5_000_000
 ```
 
-The embedded rollblock server binds to `127.0.0.1` with basic authentication. By default it uses the `mhin`/`mhin` credentials on port `9443`; change these via `--rollblock_user`, `--rollblock_password`, and `--rollblock_port`. The parser emits a startup warning when the defaults are still in use.
+The embedded rollblock server binds to `127.0.0.1` with basic authentication. By default it uses the `zeld`/`zeld` credentials on port `9443`; change these via `--rollblock_user`, `--rollblock_password`, and `--rollblock_port`. The parser emits a startup warning when the defaults are still in use.
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                       mhinparser                            │
+│                       zeldhash-parser                            │
 ├─────────────────────────────────────────────────────────────┤
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
-│  │  protoblock │  │ mhinprotocol│  │     rollblock       │  │
+│  │  protoblock │  │ zeldhash_protocol│  │     rollblock       │  │
 │  │  ───────────│  │  ───────────│  │  ─────────────────  │  │
-│  │  Fast block │  │  MHIN       │  │  UTXO store with    │  │
+│  │  Fast block │  │  ZELD       │  │  UTXO store with    │  │
 │  │  fetching & │  │  protocol   │  │  instant rollback   │  │
 │  │  processing │  │  logic      │  │  support            │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────┘  │
@@ -106,7 +106,7 @@ The embedded rollblock server binds to `127.0.0.1` with basic authentication. By
 ## CLI Reference
 
 ```
-Usage: mhinparser [OPTIONS] [COMMAND]
+Usage: zeldhash-parser [OPTIONS] [COMMAND]
 
 Commands:
   run   Start the parser (default)
@@ -131,7 +131,7 @@ Options:
 
 ### SQLite Stats Database
 
-The parser stores protocol statistics in `mhinstats.sqlite3` with two tables:
+The parser stores protocol statistics in `zeldstats.sqlite3` with two tables:
 
 ```sql
 -- Individual rewards per block
@@ -155,7 +155,7 @@ CREATE TABLE stats (
 **Example: Query rewards with sqlite3**
 
 ```bash
-sqlite3 /path/to/data/mhinstats.sqlite3 \
+sqlite3 /path/to/data/zeldstats.sqlite3 \
   "SELECT txid, zero_count, reward FROM rewards WHERE block_index = 870000;"
 ```
 
@@ -163,26 +163,31 @@ sqlite3 /path/to/data/mhinstats.sqlite3 \
 
 UTXOs are stored in a [`rollblock`](https://crates.io/crates/rollblock) key-value store for O(1) lookups and instant rollbacks.
 
-**Key format:** Each UTXO is identified by an 8-byte key computed as:
+**Key format:** Each UTXO is identified by a 12-byte key computed with the helper exposed by `zeldhash-protocol`:
 
 ```rust
-// From mhinprotocol:
-fn compute_utxo_key(txid: &Txid, vout: u32) -> [u8; 8] {
+use bitcoin::Txid;
+use xxhash_rust::xxh3::xxh3_128;
+
+fn compute_utxo_key(txid: &Txid, vout: u32) -> [u8; 12] {
     let mut payload = [0u8; 36];
     payload[..32].copy_from_slice(txid.as_ref());       // 32-byte txid
     payload[32..].copy_from_slice(&vout.to_le_bytes()); // 4-byte vout (LE)
-    xxh64(&payload, 0).to_le_bytes()                    // xxHash64 → 8 bytes
+    let hash = xxh3_128(&payload).to_le_bytes();        // xxHash128 → take first 12 bytes
+    let mut key = [0u8; 12];
+    key.copy_from_slice(&hash[..12]);                   // truncate to 96 bits
+    key
 }
 ```
 
-**Value format:** The MHIN UTXO balance stored as a little-endian `u64`.
+**Value format:** The ZELD UTXO balance stored as a little-endian `u64`.
 
 **Example: Read UTXO balances with rollblock client**
 
 ```rust
 use rollblock::client::{ClientConfig, RemoteStoreClient};
 use rollblock::net::BasicAuthConfig;
-use xxhash_rust::xxh64::xxh64;
+use zeldhash_protocol::protocol::compute_utxo_key;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Connect to rollblock server
@@ -193,10 +198,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Compute UTXO key for txid:vout
     let txid_hex = "abc123..."; // your txid
     let vout: u32 = 0;
-    let mut payload = [0u8; 36];
-    payload[..32].copy_from_slice(&hex::decode(txid_hex)?);
-    payload[32..].copy_from_slice(&vout.to_le_bytes());
-    let key = xxh64(&payload, 0).to_le_bytes();
+    let txid = bitcoin::Txid::from_hex(txid_hex)?;
+    let key = compute_utxo_key(&txid, vout);
 
     // Fetch balance
     let value = client.get_one(key)?;

@@ -4,12 +4,11 @@
 //!
 //! - Current parsing progress and sync percentage
 //! - Blockchain tip and last processed block
-//! - MHIN protocol statistics (rewards, supply, nicest hash)
+//! - ZELDHASH protocol statistics (rewards, supply, nicest hash)
 //! - Estimated time to completion
 
 use crate::stores::sqlite::CumulativeStats;
 use anyhow::{Context, Result};
-use mhinprotocol::types::Amount;
 use protoblock::rpc::AsyncRpcClient;
 use protoblock::runtime::config::FetcherConfig;
 use ratatui::{
@@ -29,6 +28,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use tokio::time::{interval, MissedTickBehavior};
+use zeldhash_protocol::types::Amount;
 
 const RENDER_INTERVAL: Duration = Duration::from_millis(750);
 const PANEL_WIDTH: u16 = 100;
@@ -261,7 +261,7 @@ fn build_info_table(snapshot: &ProgressSnapshot) -> Table<'static> {
         stats_row("Tip", tip_display),
         stats_row("Last parsed block", last_parsed),
         stats_row("Reward count", reward_count),
-        stats_row("MHIN supply", total_supply),
+        stats_row("ZELD supply", total_supply),
         stats_row("Max zero count", max_zero_count),
         stats_row("Last nice hash", nicest_hash),
         stats_row("Unspent UTXO", unspent),
@@ -556,7 +556,7 @@ mod tests {
 
     use ratatui::layout::{Constraint, Rect};
 
-    use mhinprotocol::types::Amount;
+    use zeldhash_protocol::types::Amount;
 
     use crate::stores::sqlite::CumulativeStats;
 

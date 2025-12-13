@@ -8,43 +8,43 @@ use super::{ProtoblockOptions, RollblockOptions};
 /// Command-line interface definition.
 #[derive(Parser, Debug)]
 #[command(
-    name = "mhinparser",
+    name = "zeldhash-parser",
     author,
     version,
-    about = "MyHashIsNice parser and daemon"
+    about = "ZeldHash parser and daemon"
 )]
 pub struct Cli {
     /// Path to the optional TOML configuration file.
     #[arg(
         long = "config",
         alias = "config-file",
-        env = "MHINPARSER_CONFIG",
+        env = "ZELDHASH_PARSER_CONFIG",
         global = true,
         value_name = "FILE",
         help = "Optional. Path to the TOML configuration file; defaults to the platform-specific user config directory (ProjectDirs) when omitted."
     )]
     pub config: Option<PathBuf>,
 
-    /// Select the target MHIN network for the entire application.
+    /// Select the target ZELD network for the entire application.
     #[arg(
         long = "network",
-        alias = "mhinprotocol-network",
-        env = "MHINPARSER_NETWORK",
+        alias = "zeldhash_protocol-network",
+        env = "ZELDHASH_PARSER_NETWORK",
         global = true,
         value_enum,
         value_name = "NETWORK",
-        help = "Optional. Select the target MHIN network for the application. [default: mainnet]"
+        help = "Optional. Select the target ZELD network for the application. [default: mainnet]"
     )]
-    pub network: Option<MhinNetworkArg>,
+    pub network: Option<ZeldNetworkArg>,
 
     /// Root directory for all application data.
     #[arg(
         long = "data_dir",
         alias = "data-dir",
-        env = "MHINPARSER_DATA_DIR",
+        env = "ZELDHASH_PARSER_DATA_DIR",
         global = true,
         value_name = "PATH",
-        help = "Optional. Base directory for MHIN server data (Rollblock stores data under <data_dir>/utxodb). Defaults to the platform-specific user data directory (ProjectDirs)."
+        help = "Optional. Base directory for ZELD server data (Rollblock stores data under <data_dir>/utxodb). Defaults to the platform-specific user data directory (ProjectDirs)."
     )]
     pub data_dir: Option<PathBuf>,
 
@@ -58,7 +58,7 @@ pub struct Cli {
     #[arg(
         long = "daemon",
         global = true,
-        help = "Run the parser as a daemon. Combine with `mhinparser stop` to stop it later."
+        help = "Run the parser as a daemon. Combine with `zeldhash-parser stop` to stop it later."
     )]
     pub daemon: bool,
 
@@ -72,7 +72,7 @@ pub struct Cli {
 }
 
 #[derive(ValueEnum, Clone, Debug, Deserialize)]
-pub enum MhinNetworkArg {
+pub enum ZeldNetworkArg {
     Mainnet,
     Testnet4,
     Signet,

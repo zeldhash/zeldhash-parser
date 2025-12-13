@@ -1,9 +1,9 @@
-//! Core block processing logic for the MHIN protocol.
+//! Core block processing logic for the ZELDHASH protocol.
 //!
 //! This module implements the [`BlockProtocol`] trait from protoblock,
 //! providing the main parsing pipeline that:
 //!
-//! 1. Pre-processes blocks in parallel to extract MHIN-relevant data
+//! 1. Pre-processes blocks in parallel to extract ZELD-relevant data
 //! 2. Processes blocks sequentially to update the UTXO set and statistics
 //! 3. Handles chain reorganizations through rollback support
 
@@ -13,43 +13,43 @@ use crate::stores::sqlite::{get_read_write_connection, SqliteStore};
 use crate::stores::utxo::UTXOStore;
 use anyhow::{Context, Result};
 use bitcoin::Block;
-use mhinprotocol::{
-    config::MhinConfig,
-    protocol::MhinProtocol,
-    types::{MhinInput, MhinOutput, MhinTransaction, PreProcessedMhinBlock},
-};
 use protoblock::{
     preprocessors::sized_queue::QueueByteSize,
     runtime::protocol::{
         BlockProtocol, ProtocolError, ProtocolFuture, ProtocolPreProcessFuture, ProtocolStage,
     },
 };
-use rollblock::MhinStoreBlockFacade;
+use rollblock::BlockStoreFacade;
 use rusqlite::Connection;
 use std::sync::{Arc, Mutex};
+use zeldhash_protocol::{
+    config::ZeldConfig,
+    protocol::ZeldProtocol,
+    types::{PreProcessedZeldBlock, ZeldInput, ZeldOutput, ZeldTransaction},
+};
 
-/// Parser driving block ingestion for MHIN.
-pub struct MhinParser {
-    protocol: MhinProtocol,
+/// Parser driving block ingestion for ZELD.
+pub struct ZeldParser {
+    protocol: ZeldProtocol,
     store: UTXOStore,
     progress: Option<ProgressHandle>,
     sqlite_conn: Arc<Mutex<Connection>>,
 }
 
-impl MhinParser {
+impl ZeldParser {
     /// Builds a parser from the full application configuration.
     pub fn new(app_config: AppConfig) -> Result<Self> {
-        let mhin_config = MhinConfig::for_network(app_config.network);
+        let zeld_config = ZeldConfig::for_network(app_config.network);
         let store_config = app_config.rollblock.store_config.clone();
-        let store = MhinStoreBlockFacade::new(store_config)
-            .context("failed to initialize rollblock store")?;
+        let store =
+            BlockStoreFacade::new(store_config).context("failed to initialize rollblock store")?;
         let store = UTXOStore::new(store);
         let sqlite_conn = get_read_write_connection(&app_config.data_dir)
-            .context("failed to open MHIN SQLite store")?;
+            .context("failed to open ZELD SQLite store")?;
         let sqlite_conn = Arc::new(Mutex::new(sqlite_conn));
-        SqliteStore::initialize(&sqlite_conn).context("failed to initialize MHIN SQLite store")?;
+        SqliteStore::initialize(&sqlite_conn).context("failed to initialize ZELD SQLite store")?;
         Ok(Self {
-            protocol: MhinProtocol::new(mhin_config),
+            protocol: ZeldProtocol::new(zeld_config),
             store,
             progress: None,
             sqlite_conn,
@@ -71,7 +71,7 @@ impl MhinParser {
     }
 }
 
-impl BlockProtocol for MhinParser {
+impl BlockProtocol for ZeldParser {
     type PreProcessed = PreProcessedBlock;
 
     fn pre_process(
@@ -149,35 +149,35 @@ impl BlockProtocol for MhinParser {
 /// Wrapper used to attach queue sizing metadata to pre-processed blocks.
 #[derive(Clone)]
 pub struct PreProcessedBlock {
-    inner: PreProcessedMhinBlock,
+    inner: PreProcessedZeldBlock,
 }
 
 impl PreProcessedBlock {
-    pub fn new(inner: PreProcessedMhinBlock) -> Self {
+    pub fn new(inner: PreProcessedZeldBlock) -> Self {
         Self { inner }
     }
 
-    pub fn into_inner(self) -> PreProcessedMhinBlock {
+    pub fn into_inner(self) -> PreProcessedZeldBlock {
         self.inner
     }
 }
 
 impl QueueByteSize for PreProcessedBlock {
     fn queue_bytes(&self) -> usize {
-        let mut total = core::mem::size_of::<PreProcessedMhinBlock>();
+        let mut total = core::mem::size_of::<PreProcessedZeldBlock>();
 
         for tx in &self.inner.transactions {
             total = total
-                .saturating_add(core::mem::size_of::<MhinTransaction>())
+                .saturating_add(core::mem::size_of::<ZeldTransaction>())
                 .saturating_add(
                     tx.inputs
                         .len()
-                        .saturating_mul(core::mem::size_of::<MhinInput>()),
+                        .saturating_mul(core::mem::size_of::<ZeldInput>()),
                 )
                 .saturating_add(
                     tx.outputs
                         .len()
-                        .saturating_mul(core::mem::size_of::<MhinOutput>()),
+                        .saturating_mul(core::mem::size_of::<ZeldOutput>()),
                 );
         }
 
@@ -191,16 +191,16 @@ mod tests {
     use bitcoin::{hashes::Hash, Txid};
     use core::mem::size_of;
 
-    fn sample_tx(id: u8, inputs: usize, outputs: usize) -> MhinTransaction {
+    fn sample_tx(id: u8, inputs: usize, outputs: usize) -> ZeldTransaction {
         let txid = Txid::from_slice(&[id; 32]).expect("txid");
         let inputs = (0..inputs)
-            .map(|i| MhinInput {
-                utxo_key: [i as u8; 8],
+            .map(|i| ZeldInput {
+                utxo_key: [i as u8; 12],
             })
             .collect();
         let outputs = (0..outputs)
-            .map(|i| MhinOutput {
-                utxo_key: [i as u8; 8],
+            .map(|i| ZeldOutput {
+                utxo_key: [i as u8; 12],
                 value: 1,
                 reward: 1,
                 distribution: 0,
@@ -208,7 +208,7 @@ mod tests {
             })
             .collect();
 
-        MhinTransaction {
+        ZeldTransaction {
             txid,
             inputs,
             outputs,
@@ -220,17 +220,17 @@ mod tests {
 
     #[test]
     fn queue_bytes_counts_transactions_inputs_and_outputs() {
-        let block = PreProcessedMhinBlock {
+        let block = PreProcessedZeldBlock {
             transactions: vec![sample_tx(1, 1, 2), sample_tx(2, 2, 1)],
             max_zero_count: 2,
         };
         let pre_processed = PreProcessedBlock::new(block.clone());
 
-        let mut expected = size_of::<PreProcessedMhinBlock>();
+        let mut expected = size_of::<PreProcessedZeldBlock>();
         for tx in &block.transactions {
-            expected += size_of::<MhinTransaction>();
-            expected += tx.inputs.len() * size_of::<MhinInput>();
-            expected += tx.outputs.len() * size_of::<MhinOutput>();
+            expected += size_of::<ZeldTransaction>();
+            expected += tx.inputs.len() * size_of::<ZeldInput>();
+            expected += tx.outputs.len() * size_of::<ZeldOutput>();
         }
 
         assert_eq!(pre_processed.queue_bytes(), expected);
@@ -238,7 +238,7 @@ mod tests {
 
     #[test]
     fn pre_processed_block_into_inner_returns_original() {
-        let block = PreProcessedMhinBlock {
+        let block = PreProcessedZeldBlock {
             transactions: vec![sample_tx(3, 2, 3)],
             max_zero_count: 5,
         };
@@ -251,7 +251,7 @@ mod tests {
 
     #[test]
     fn pre_processed_block_is_clone() {
-        let block = PreProcessedMhinBlock {
+        let block = PreProcessedZeldBlock {
             transactions: vec![sample_tx(1, 1, 1)],
             max_zero_count: 1,
         };
@@ -263,45 +263,45 @@ mod tests {
 
     #[test]
     fn queue_bytes_handles_empty_block() {
-        let block = PreProcessedMhinBlock {
+        let block = PreProcessedZeldBlock {
             transactions: vec![],
             max_zero_count: 0,
         };
         let pre_processed = PreProcessedBlock::new(block);
 
-        // Empty block should just be the size of PreProcessedMhinBlock itself
+        // Empty block should just be the size of PreProcessedZeldBlock itself
         assert_eq!(
             pre_processed.queue_bytes(),
-            size_of::<PreProcessedMhinBlock>()
+            size_of::<PreProcessedZeldBlock>()
         );
     }
 
     #[test]
     fn queue_bytes_handles_many_inputs_outputs() {
-        let block = PreProcessedMhinBlock {
+        let block = PreProcessedZeldBlock {
             transactions: vec![sample_tx(1, 100, 200)],
             max_zero_count: 1,
         };
         let pre_processed = PreProcessedBlock::new(block);
 
-        let expected = size_of::<PreProcessedMhinBlock>()
-            + size_of::<MhinTransaction>()
-            + 100 * size_of::<MhinInput>()
-            + 200 * size_of::<MhinOutput>();
+        let expected = size_of::<PreProcessedZeldBlock>()
+            + size_of::<ZeldTransaction>()
+            + 100 * size_of::<ZeldInput>()
+            + 200 * size_of::<ZeldOutput>();
 
         assert_eq!(pre_processed.queue_bytes(), expected);
     }
 
     #[test]
     fn pre_processed_block_new_creates_wrapper() {
-        let block = PreProcessedMhinBlock {
+        let block = PreProcessedZeldBlock {
             transactions: vec![],
             max_zero_count: 0,
         };
         let pre_processed = PreProcessedBlock::new(block);
         assert_eq!(
             pre_processed.queue_bytes(),
-            size_of::<PreProcessedMhinBlock>()
+            size_of::<PreProcessedZeldBlock>()
         );
     }
 
@@ -315,17 +315,17 @@ mod tests {
 
     #[test]
     fn queue_bytes_with_multiple_transactions() {
-        let block = PreProcessedMhinBlock {
+        let block = PreProcessedZeldBlock {
             transactions: vec![sample_tx(1, 2, 3), sample_tx(2, 4, 5), sample_tx(3, 6, 7)],
             max_zero_count: 3,
         };
         let pre_processed = PreProcessedBlock::new(block.clone());
 
-        let mut expected = size_of::<PreProcessedMhinBlock>();
+        let mut expected = size_of::<PreProcessedZeldBlock>();
         for tx in &block.transactions {
-            expected += size_of::<MhinTransaction>();
-            expected += tx.inputs.len() * size_of::<MhinInput>();
-            expected += tx.outputs.len() * size_of::<MhinOutput>();
+            expected += size_of::<ZeldTransaction>();
+            expected += tx.inputs.len() * size_of::<ZeldInput>();
+            expected += tx.outputs.len() * size_of::<ZeldOutput>();
         }
 
         assert_eq!(pre_processed.queue_bytes(), expected);
@@ -333,7 +333,7 @@ mod tests {
 
     #[test]
     fn pre_processed_block_clone_preserves_data() {
-        let block = PreProcessedMhinBlock {
+        let block = PreProcessedZeldBlock {
             transactions: vec![sample_tx(2, 1, 2)],
             max_zero_count: 2,
         };
@@ -350,11 +350,11 @@ mod tests {
 
     #[test]
     fn queue_bytes_handles_transaction_with_no_inputs() {
-        let tx = MhinTransaction {
+        let tx = ZeldTransaction {
             txid: Txid::from_slice(&[1u8; 32]).expect("txid"),
             inputs: vec![],
-            outputs: vec![MhinOutput {
-                utxo_key: [0u8; 8],
+            outputs: vec![ZeldOutput {
+                utxo_key: [0u8; 12],
                 value: 100,
                 reward: 10,
                 distribution: 0,
@@ -365,46 +365,48 @@ mod tests {
             has_op_return_distribution: false,
         };
 
-        let block = PreProcessedMhinBlock {
+        let block = PreProcessedZeldBlock {
             transactions: vec![tx],
             max_zero_count: 1,
         };
         let pre_processed = PreProcessedBlock::new(block);
 
-        let expected = size_of::<PreProcessedMhinBlock>()
-            + size_of::<MhinTransaction>()
-            + size_of::<MhinOutput>();
+        let expected = size_of::<PreProcessedZeldBlock>()
+            + size_of::<ZeldTransaction>()
+            + size_of::<ZeldOutput>();
 
         assert_eq!(pre_processed.queue_bytes(), expected);
     }
 
     #[test]
     fn queue_bytes_handles_transaction_with_no_outputs() {
-        let tx = MhinTransaction {
+        let tx = ZeldTransaction {
             txid: Txid::from_slice(&[2u8; 32]).expect("txid"),
-            inputs: vec![MhinInput { utxo_key: [1u8; 8] }],
+            inputs: vec![ZeldInput {
+                utxo_key: [1u8; 12],
+            }],
             outputs: vec![],
             zero_count: 0,
             reward: 0,
             has_op_return_distribution: false,
         };
 
-        let block = PreProcessedMhinBlock {
+        let block = PreProcessedZeldBlock {
             transactions: vec![tx],
             max_zero_count: 0,
         };
         let pre_processed = PreProcessedBlock::new(block);
 
-        let expected = size_of::<PreProcessedMhinBlock>()
-            + size_of::<MhinTransaction>()
-            + size_of::<MhinInput>();
+        let expected = size_of::<PreProcessedZeldBlock>()
+            + size_of::<ZeldTransaction>()
+            + size_of::<ZeldInput>();
 
         assert_eq!(pre_processed.queue_bytes(), expected);
     }
 
     #[test]
     fn pre_processed_block_inner_access() {
-        let block = PreProcessedMhinBlock {
+        let block = PreProcessedZeldBlock {
             transactions: vec![sample_tx(5, 2, 3)],
             max_zero_count: 5,
         };
