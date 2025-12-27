@@ -5,7 +5,6 @@
 [![Format](https://github.com/ouziel-slama/zeldhash-parser/actions/workflows/fmt.yml/badge.svg)](https://github.com/ouziel-slama/zeldhash-parser/actions/workflows/fmt.yml)
 [![Clippy](https://github.com/ouziel-slama/zeldhash-parser/actions/workflows/clippy.yml/badge.svg)](https://github.com/ouziel-slama/zeldhash-parser/actions/workflows/clippy.yml)
 [![Crates.io](https://img.shields.io/crates/v/zeldhash-parser.svg)](https://crates.io/crates/zeldhash-parser)
-[![Docs.rs](https://docs.rs/zeldhash-parser/badge.svg)](https://docs.rs/zeldhash-parser)
 
 A high-performance Bitcoin blockchain parser implementing the **[ZeldHash](https://zeldhash.com/)** protocol.
 

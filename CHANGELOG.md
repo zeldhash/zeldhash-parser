@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2025-12-27
+
+### Changed
+
+- Bumped `zeldhash-protocol` to 0.4.0
+- Bumped minimum Rust version to 1.83
+- Added `rust-toolchain.toml` to enforce Rust 1.83
+
+### Notes
+
+- **Full reparse required**: This version requires a complete reparse of the blockchain due to protocol changes
+
 ## [0.2.1] - 2025-12-13
 
 ### Changed
@@ -46,6 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - TOML configuration file support
 - CLI with environment variable overrides
 
+[0.3.0]: https://github.com/ouziel-slama/zeldhash-parser/releases/tag/v0.3.0
 [0.2.1]: https://github.com/ouziel-slama/zeldhash-parser/releases/tag/v0.2.1
 [0.2.0]: https://github.com/ouziel-slama/zeldhash-parser/releases/tag/v0.2.0
 [0.1.1]: https://github.com/ouziel-slama/zeldhash-parser/releases/tag/v0.1.1

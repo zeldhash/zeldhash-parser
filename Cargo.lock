@@ -2727,7 +2727,7 @@ dependencies = [
 
 [[package]]
 name = "zeldhash-parser"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "bitcoin",
@@ -2753,9 +2753,9 @@ dependencies = [
 
 [[package]]
 name = "zeldhash-protocol"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c556ab5d7e99706b6d6d7a6952bab6adae9e78df3a0fa92aa7ffe3754d76e7f7"
+checksum = "1907ef5ee32da6d597497faff63578194d3b7e07d75211f3d5bf8f0b2e00ca8c"
 dependencies = [
  "bitcoin",
  "ciborium",

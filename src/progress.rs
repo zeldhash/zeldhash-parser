@@ -276,7 +276,7 @@ fn build_info_table(snapshot: &ProgressSnapshot) -> Table<'static> {
         )
 }
 
-fn stats_row<'a>(label: &'a str, value: String) -> Row<'a> {
+fn stats_row(label: &str, value: String) -> Row<'_> {
     Row::new(vec![
         Cell::from(label).style(Style::default().fg(Color::Gray)),
         Cell::from(value),

@@ -86,7 +86,7 @@ impl BlockProtocol for ZeldParser {
         })
     }
 
-    fn process<'a>(&'a mut self, data: Self::PreProcessed, height: u64) -> ProtocolFuture<'a> {
+    fn process(&mut self, data: Self::PreProcessed, height: u64) -> ProtocolFuture<'_> {
         Box::pin(async move {
             self.store
                 .start_block(height)
@@ -116,7 +116,7 @@ impl BlockProtocol for ZeldParser {
         })
     }
 
-    fn rollback<'a>(&'a mut self, block_height: u64) -> ProtocolFuture<'a> {
+    fn rollback(&mut self, block_height: u64) -> ProtocolFuture<'_> {
         Box::pin(async move {
             self.store
                 .rollback(block_height)
@@ -136,7 +136,7 @@ impl BlockProtocol for ZeldParser {
         })
     }
 
-    fn shutdown<'a>(&'a mut self) -> ProtocolFuture<'a> {
+    fn shutdown(&mut self) -> ProtocolFuture<'_> {
         Box::pin(async move {
             self.store
                 .close()

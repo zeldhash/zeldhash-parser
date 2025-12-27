@@ -48,7 +48,7 @@ pub(crate) struct UTXOStoreView<'a> {
     facade: &'a BlockStoreFacade,
 }
 
-impl<'a> UTXOStoreView<'a> {
+impl UTXOStoreView<'_> {
     #[inline]
     fn to_store_key(key: &UtxoKey) -> StoreKey {
         StoreKey::from_prefix(*key)
@@ -68,7 +68,7 @@ impl<'a> UTXOStoreView<'a> {
     }
 }
 
-impl<'a> ZeldStore for UTXOStoreView<'a> {
+impl ZeldStore for UTXOStoreView<'_> {
     fn get(&mut self, key: &UtxoKey) -> Amount {
         let store_key = Self::to_store_key(key);
         let value = self.facade.get(store_key).unwrap_or_else(|err| {
