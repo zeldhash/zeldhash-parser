@@ -64,6 +64,8 @@ impl SqliteStore {
         queries::create_rewards_table(&tx)?;
         queries::create_stats_table(&tx)?;
         queries::create_rewards_block_index_index(&tx)?;
+        queries::create_rewards_txid_index(&tx)?;
+        queries::create_rewards_zero_count_index(&tx)?;
 
         tx.commit()
             .context("failed to commit SQLite transaction for ensure_schema")?;
@@ -658,9 +660,39 @@ mod tests {
                 |_| Ok(true),
             )
             .unwrap_or(false);
+        let rewards_block_index_exists: bool = guard
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type='index' AND name='rewards_block_index_idx'",
+                [],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+        let rewards_txid_exists: bool = guard
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type='index' AND name='rewards_txid_idx'",
+                [],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+        let rewards_zero_count_exists: bool = guard
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type='index' AND name='rewards_zero_count_idx'",
+                [],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
 
         assert!(rewards_exists, "rewards table should exist");
         assert!(stats_exists, "stats table should exist");
+        assert!(
+            rewards_block_index_exists,
+            "rewards block index should exist"
+        );
+        assert!(rewards_txid_exists, "rewards txid index should exist");
+        assert!(
+            rewards_zero_count_exists,
+            "rewards zero_count index should exist"
+        );
     }
 
     #[test]

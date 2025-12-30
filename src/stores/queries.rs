@@ -50,6 +50,26 @@ pub fn create_rewards_block_index_index(tx: &Transaction<'_>) -> Result<()> {
     Ok(())
 }
 
+/// Creates an index on `rewards(txid)` for fast lookups by transaction id.
+pub fn create_rewards_txid_index(tx: &Transaction<'_>) -> Result<()> {
+    tx.execute(
+        "CREATE INDEX IF NOT EXISTS rewards_txid_idx ON rewards(txid)",
+        [],
+    )
+    .context("failed to ensure rewards txid index")?;
+    Ok(())
+}
+
+/// Creates an index on `rewards(zero_count DESC)` for sorting by zero count.
+pub fn create_rewards_zero_count_index(tx: &Transaction<'_>) -> Result<()> {
+    tx.execute(
+        "CREATE INDEX IF NOT EXISTS rewards_zero_count_idx ON rewards(zero_count DESC)",
+        [],
+    )
+    .context("failed to ensure rewards zero_count index")?;
+    Ok(())
+}
+
 /// Deletes all reward rows with `block_index > threshold`.
 pub fn delete_rewards_after_block(tx: &Transaction<'_>, block_index: i64) -> Result<()> {
     tx.execute(
@@ -133,6 +153,8 @@ mod tests {
         create_rewards_table(&tx).expect("create rewards");
         create_stats_table(&tx).expect("create stats");
         create_rewards_block_index_index(&tx).expect("create index");
+        create_rewards_txid_index(&tx).expect("create txid index");
+        create_rewards_zero_count_index(&tx).expect("create zero_count index");
 
         let rewards_exists: i64 = tx
             .query_row(
@@ -155,10 +177,26 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("index query");
+        let txid_index_exists: i64 = tx
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='index' AND name='rewards_txid_idx'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("txid index query");
+        let zero_count_index_exists: i64 = tx
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='index' AND name='rewards_zero_count_idx'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("zero_count index query");
 
         assert_eq!(rewards_exists, 1);
         assert_eq!(stats_exists, 1);
         assert_eq!(index_exists, 1);
+        assert_eq!(txid_index_exists, 1);
+        assert_eq!(zero_count_index_exists, 1);
     }
 
     #[test]
