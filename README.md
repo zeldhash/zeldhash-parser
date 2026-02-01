@@ -1,9 +1,9 @@
 # zeldhash-parser
 
-[![Tests](https://github.com/ouziel-slama/zeldhash-parser/actions/workflows/tests.yml/badge.svg)](https://github.com/ouziel-slama/zeldhash-parser/actions/workflows/tests.yml)
-[![Coverage](https://codecov.io/github/ouziel-slama/zeldhash-parser/graph/badge.svg?token=QKMVNDU06E)](https://codecov.io/github/ouziel-slama/zeldhash-parser)
-[![Format](https://github.com/ouziel-slama/zeldhash-parser/actions/workflows/fmt.yml/badge.svg)](https://github.com/ouziel-slama/zeldhash-parser/actions/workflows/fmt.yml)
-[![Clippy](https://github.com/ouziel-slama/zeldhash-parser/actions/workflows/clippy.yml/badge.svg)](https://github.com/ouziel-slama/zeldhash-parser/actions/workflows/clippy.yml)
+[![Tests](https://github.com/zeldhash/zeldhash-parser/actions/workflows/tests.yml/badge.svg)](https://github.com/zeldhash/zeldhash-parser/actions/workflows/tests.yml)
+[![Coverage](https://codecov.io/github/zeldhash/zeldhash-parser/graph/badge.svg?token=QKMVNDU06E)](https://codecov.io/github/zeldhash/zeldhash-parser)
+[![Format](https://github.com/zeldhash/zeldhash-parser/actions/workflows/fmt.yml/badge.svg)](https://github.com/zeldhash/zeldhash-parser/actions/workflows/fmt.yml)
+[![Clippy](https://github.com/zeldhash/zeldhash-parser/actions/workflows/clippy.yml/badge.svg)](https://github.com/zeldhash/zeldhash-parser/actions/workflows/clippy.yml)
 [![Crates.io](https://img.shields.io/crates/v/zeldhash-parser.svg)](https://crates.io/crates/zeldhash-parser)
 
 A high-performance Bitcoin blockchain parser implementing the **[ZeldHash](https://zeldhash.com/)** protocol.
@@ -27,7 +27,7 @@ cargo install zeldhash-parser
 Or build from source:
 
 ```bash
-git clone https://github.com/ouziel-slama/zeldhash-parser
+git clone https://github.com/zeldhash/zeldhash-parser
 cd zeldhash-parser
 cargo build --release
 ```

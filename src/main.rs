@@ -28,7 +28,7 @@
 //! zeldhash-parser --daemon
 //! ```
 //!
-//! See the [README](https://github.com/ouziel-slama/zeldhash-parser) for full documentation.
+//! See the [README](https://github.com/zeldhash/zeldhash-parser) for full documentation.
 
 mod cli;
 mod config;

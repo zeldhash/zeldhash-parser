@@ -9,7 +9,7 @@ description = "High-performance Bitcoin blockchain parser implementing the ZeldH
 readme = "README.md"
 homepage = "https://zeldhash.com"
 documentation = "https://docs.rs/zeldhash-parser"
-repository = "https://github.com/ouziel-slama/zeldhash-parser"
+repository = "https://github.com/zeldhash/zeldhash-parser"
 keywords = ["bitcoin", "blockchain", "parser", "zeld", "zeldhash"]
 categories = ["cryptography::cryptocurrencies"]
 
